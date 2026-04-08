@@ -1,9 +1,14 @@
 // utils/menu.js
-function sendMainMenu(bot, chatId, status = "active") {
+function sendMainMenu(
+  bot,
+  chatId,
+  status = "active",
+  messageText = "🛡️ Protect Every Connection — 📅 Events & Contacts in One Place:"
+) {
   const isMuted = String(status || "").toLowerCase() === "muted";
   const toggleLabel = isMuted ? "🔔 Unmute Notification" : "🔕 Mute Notification";
 
-  return bot.sendMessage(chatId, "🛡️ Protect Every Connection — 📅 Events & Contacts in One Place:", {
+  return bot.sendMessage(chatId, String(messageText || " "), {
     reply_markup: {
       keyboard: [
         ["📥 Leads", "📞 Contacts"],

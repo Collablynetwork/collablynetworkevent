@@ -434,9 +434,12 @@ async function handleChangeStatus(msg, bot) {
     const newStatus = current === NOTIF_MUTED ? NOTIF_ACTIVE : NOTIF_MUTED;
 
     await writeStatusToStorage(me, newStatus);
-
-    await bot.sendMessage(chatId, `Status updated: ${statusLabel(newStatus)}`);
-    return sendMainMenu(bot, chatId, newStatus);
+    return sendMainMenu(
+      bot,
+      chatId,
+      newStatus,
+      `Status updated: ${statusLabel(newStatus)}`
+    );
   } catch (err) {
     console.error("handleChangeStatus error:", err);
     await bot.sendMessage(chatId, "⚠️ Couldn't change your status. Please try again.");
