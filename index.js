@@ -51,6 +51,7 @@ const ADMIN_COMMANDS = [
   { command: 'pendingprofiles', description: 'List incomplete profiles and remind them' },
   { command: 'dm', description: 'Send a direct message: /dm @username message' },
   { command: 'massdm', description: 'Broadcast a message to users or a segment' },
+  { command: 'removelastmassdm', description: 'Delete the last mass DM batch' },
   { command: 'export', description: 'Export data: csv, google, or excel' },
   { command: 'forceexport', description: 'Force SQLite data export to Google Sheets' },
   { command: 'removeuser', description: 'Delete one user and related data' },
@@ -403,6 +404,11 @@ bot.onText(/\/(?:dm|message)(?:\s+(.+))?/, async (msg, match) => {
 bot.onText(/\/massdm(?:\s+(.+))?/, async (msg, match) => {
   if (!(await ensureNotBlockedMessage(msg))) return;
   await chatHandler.handleMassDmCommand(msg, bot, match && match[1]);
+});
+
+bot.onText(/\/removelastmassdm/, async msg => {
+  if (!(await ensureNotBlockedMessage(msg))) return;
+  await chatHandler.handleRemoveLastMassDmCommand(msg, bot);
 });
 
 bot.onText(/\/chat(?:\s+(.+))?/, async (msg, match) => {
