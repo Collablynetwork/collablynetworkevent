@@ -18,6 +18,8 @@ const SHEET_TO_DATASET = {
   exportrequests: 'requests',
   approvalkeywords: 'approvalKeywords',
   exportapprovalkeywords: 'approvalKeywords',
+  massdmhistory: 'massDmHistory',
+  exportmassdmhistory: 'massDmHistory',
   profileupdatehistory: 'profileUpdateHistory',
   exportprofileupdatehistory: 'profileUpdateHistory',
   notregister: 'NotRegister',
@@ -194,6 +196,21 @@ function normalizeApprovalKeywordsRows(header, rows) {
     .filter((row) => row[0]);
 }
 
+function normalizeMassDmHistoryRows(header, rows) {
+  const indexMap = buildIndexMap(header);
+  return rows
+    .filter(rowHasAnyData)
+    .map((row) => [
+      normalizeCell(getValue(row, indexMap, 'senderChatId')),
+      normalizeCell(getValue(row, indexMap, 'batchId')),
+      normalizeCell(getValue(row, indexMap, 'selection')),
+      normalizeCell(getValue(row, indexMap, 'messageText')),
+      normalizeCell(getValue(row, indexMap, 'createdAt')),
+      normalizeCell(getValue(row, indexMap, 'deliveryJson')),
+    ])
+    .filter((row) => row[0]);
+}
+
 function normalizeProfileUpdateHistoryRows(header, rows) {
   const indexMap = buildIndexMap(header);
   return rows
@@ -319,6 +336,7 @@ const NORMALIZERS = {
   contacts: normalizeContactsRows,
   requests: normalizeRequestsRows,
   approvalKeywords: normalizeApprovalKeywordsRows,
+  massDmHistory: normalizeMassDmHistoryRows,
   profileUpdateHistory: normalizeProfileUpdateHistoryRows,
   NotRegister: normalizeNotRegisterRows,
   itinerary: normalizeItineraryRows,

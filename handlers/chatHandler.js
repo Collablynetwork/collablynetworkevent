@@ -171,6 +171,7 @@ function getChatUsage() {
     '/dm @username <message>\n' +
     '/massdm @username\n' +
     '/massdm all\n' +
+    '/removelastmassdm\n' +
     '/chat @username\n' +
     '/chat off'
   );
@@ -183,7 +184,8 @@ function getMassDmUsage() {
     '/massdm @username\n' +
     '/massdm @user1,@user2\n' +
     '/massdm <message>\n' +
-    '/massdm off'
+    '/massdm off\n' +
+    '/removelastmassdm'
   );
 }
 
@@ -356,7 +358,11 @@ async function sendRelayedMessage(bot, fromChatId, target, messageText, meta = {
         : [`💬 ${senderLabel}`, '', String(messageText || ''), '', replyInstruction].join('\n');
 
   try {
-    await bot.sendMessage(Number(target.chatId), message);
+    const sentMessage = await bot.sendMessage(Number(target.chatId), message);
+    return {
+      sender,
+      sentMessage,
+    };
   } catch (error) {
     if (reachability.isTelegramUnavailableError(error)) {
       await reachability.markTelegramUnavailable(target.chatId, {
@@ -370,7 +376,6 @@ async function sendRelayedMessage(bot, fromChatId, target, messageText, meta = {
     throw error;
   }
 
-  return sender;
 }
 
 async function parseRecipients(selectionText, senderChatId) {
@@ -442,19 +447,62 @@ function splitMassDmArgs(rawArgs) {
 async function broadcastMessage(bot, senderChatId, recipients, messageText) {
   let delivered = 0;
   const failed = [];
+  const deliveries = [];
 
   for (const recipient of recipients) {
     try {
-      await sendRelayedMessage(bot, senderChatId, recipient, messageText, {
+      const result = await sendRelayedMessage(bot, senderChatId, recipient, messageText, {
         isBroadcast: true,
       });
+      if (result?.sentMessage?.message_id) {
+        deliveries.push({
+          chatId: String(recipient.chatId),
+          messageId: Number(result.sentMessage.message_id),
+        });
+      }
       delivered += 1;
     } catch (err) {
       failed.push(`${formatPersonLabel(recipient)}: ${err.message}`);
     }
   }
 
-  return { delivered, failed };
+  return { delivered, failed, deliveries };
+}
+
+async function removeLastMassDm(bot, senderChatId) {
+  const batch = await storage.getLastMassDmBatch(senderChatId);
+  if (!batch || !Array.isArray(batch.deliveries) || !batch.deliveries.length) {
+    return { found: false, deleted: 0, failed: [] };
+  }
+
+  let deleted = 0;
+  const failed = [];
+  const remainingDeliveries = [];
+
+  for (const delivery of batch.deliveries) {
+    try {
+      await bot.deleteMessage(Number(delivery.chatId), Number(delivery.messageId));
+      deleted += 1;
+    } catch (error) {
+      remainingDeliveries.push(delivery);
+      failed.push(`${delivery.chatId}: ${error.message}`);
+    }
+  }
+
+  if (remainingDeliveries.length) {
+    await storage.updateLastMassDmBatch(senderChatId, {
+      deliveries: remainingDeliveries,
+    });
+  } else {
+    await storage.clearLastMassDmBatch(senderChatId);
+  }
+
+  return {
+    found: true,
+    deleted,
+    failed,
+    remaining: remainingDeliveries.length,
+  };
 }
 
 async function handleAudienceCommand(msg, bot) {
@@ -567,6 +615,14 @@ async function handleMassDmCommand(msg, bot, rawArgs) {
 
   if (parsed.mode === 'send') {
     const result = await broadcastMessage(bot, chatId, recipients, parsed.messageText);
+    if (result.deliveries.length) {
+      await storage.saveLastMassDmBatch({
+        senderChatId: chatId,
+        selection: parsed.selection || 'all',
+        messageText: parsed.messageText,
+        deliveries: result.deliveries,
+      });
+    }
     await bot.sendMessage(
       chatId,
       [
@@ -673,6 +729,14 @@ async function handleOutgoingMessage(msg, bot) {
       pendingBroadcast.recipients,
       text
     );
+    if (result.deliveries.length) {
+      await storage.saveLastMassDmBatch({
+        senderChatId: chatId,
+        selection: pendingBroadcast.selection || 'all',
+        messageText: text,
+        deliveries: result.deliveries,
+      });
+    }
     await bot.sendMessage(
       chatId,
       [
@@ -738,6 +802,41 @@ async function handleOutgoingMessage(msg, bot) {
   return true;
 }
 
+async function handleRemoveLastMassDmCommand(msg, bot) {
+  const chatId = String(msg.chat.id);
+  const username = msg.from && msg.from.username;
+
+  if (!HAS_ADMIN_CONFIG) {
+    await bot.sendMessage(
+      chatId,
+      '⚠️ Set ADMIN_CHAT_IDS or ADMIN_USERNAMES in .env to enable /removelastmassdm.'
+    );
+    return;
+  }
+
+  if (!isAdmin(chatId, username)) {
+    await bot.sendMessage(chatId, '⚠️ /removelastmassdm is restricted to the admin chat.');
+    return;
+  }
+
+  const result = await removeLastMassDm(bot, chatId);
+  if (!result.found) {
+    await bot.sendMessage(chatId, '⚠️ No previous mass DM batch found to remove.');
+    return;
+  }
+
+  await bot.sendMessage(
+    chatId,
+    [
+      `✅ Removed ${result.deleted} mass DM message(s).`,
+      result.failed.length ? `Failed to remove: ${result.failed.length}` : null,
+      result.remaining ? `Still pending removal: ${result.remaining}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  );
+}
+
 async function openChatFromCallback(query, bot) {
   const data = String(query.data || '');
   if (!data.startsWith('chat_open_')) return false;
@@ -785,5 +884,6 @@ module.exports = {
   handleDirectMessageCommand,
   handleEndChatCommand,
   handleMassDmCommand,
+  handleRemoveLastMassDmCommand,
   handleOutgoingMessage,
 };

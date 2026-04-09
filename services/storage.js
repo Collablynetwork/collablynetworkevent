@@ -33,6 +33,14 @@ const HEADERS = {
   contacts: ['From', 'To', 'Timestamp'],
   requests: ['From', 'To', 'Status', 'Timestamp'],
   approvalKeywords: ['keyword', 'addedAt', 'addedBy'],
+  massDmHistory: [
+    'senderChatId',
+    'batchId',
+    'selection',
+    'messageText',
+    'createdAt',
+    'deliveryJson',
+  ],
   profileUpdateHistory: ['chatId', 'username', 'editedAt'],
   telegramReachability: [
     'chatId',
@@ -932,6 +940,52 @@ function toProfileUpdateHistoryRow(entry = {}) {
   ];
 }
 
+function parseMassDmHistoryRow(row = []) {
+  const normalized = normalizeDataRow(row, HEADERS.massDmHistory.length);
+  let deliveries = [];
+
+  if (normalized[5]) {
+    try {
+      const parsed = JSON.parse(normalized[5]);
+      deliveries = Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      deliveries = [];
+    }
+  }
+
+  return {
+    senderChatId: String(normalized[0] || ''),
+    batchId: String(normalized[1] || ''),
+    selection: String(normalized[2] || ''),
+    messageText: String(normalized[3] || ''),
+    createdAt: String(normalized[4] || ''),
+    deliveries: deliveries
+      .map((entry) => ({
+        chatId: String(entry?.chatId || ''),
+        messageId: Number(entry?.messageId || 0),
+      }))
+      .filter((entry) => entry.chatId && Number.isFinite(entry.messageId) && entry.messageId > 0),
+  };
+}
+
+function toMassDmHistoryRow(entry = {}) {
+  return [
+    String(entry.senderChatId || ''),
+    String(entry.batchId || ''),
+    String(entry.selection || ''),
+    String(entry.messageText || ''),
+    String(entry.createdAt || ''),
+    JSON.stringify(
+      Array.isArray(entry.deliveries)
+        ? entry.deliveries.map((delivery) => ({
+            chatId: String(delivery?.chatId || ''),
+            messageId: Number(delivery?.messageId || 0),
+          }))
+        : []
+    ),
+  ];
+}
+
 async function getProfileUpdateHistory(identifier = '', username = '') {
   await ensureSheetHeader('profileUpdateHistory', HEADERS.profileUpdateHistory);
   const rows = await getRows('profileUpdateHistory');
@@ -998,6 +1052,103 @@ async function getProfileEditAllowance(identifier, username = '') {
     nextAvailableAt,
     recentUpdates,
   };
+}
+
+async function getMassDmHistory(senderChatId = '') {
+  await ensureSheetHeader('massDmHistory', HEADERS.massDmHistory);
+  const rows = await getRows('massDmHistory');
+  const sender = String(senderChatId || '').trim();
+
+  return rows
+    .slice(1)
+    .map(parseMassDmHistoryRow)
+    .filter((row) => !sender || row.senderChatId === sender)
+    .sort(
+      (left, right) =>
+        parseIsoTimestamp(right.createdAt) - parseIsoTimestamp(left.createdAt)
+    );
+}
+
+async function getLastMassDmBatch(senderChatId) {
+  const rows = await getMassDmHistory(senderChatId);
+  return rows[0] || null;
+}
+
+async function saveLastMassDmBatch(entry = {}) {
+  await ensureSheetHeader('massDmHistory', HEADERS.massDmHistory);
+  const senderChatId = String(entry.senderChatId || '').trim();
+  if (!senderChatId) {
+    throw new Error('senderChatId is required to save mass DM history.');
+  }
+
+  const history = await getMassDmHistory();
+  const next = history.filter((row) => row.senderChatId !== senderChatId);
+  next.push({
+    senderChatId,
+    batchId: String(entry.batchId || `massdm_${Date.now()}`),
+    selection: String(entry.selection || ''),
+    messageText: String(entry.messageText || ''),
+    createdAt: String(entry.createdAt || new Date().toISOString()),
+    deliveries: Array.isArray(entry.deliveries) ? entry.deliveries : [],
+  });
+
+  await replaceDatasetRows(
+    'massDmHistory',
+    next.map((row) => toMassDmHistoryRow(row))
+  );
+
+  return getLastMassDmBatch(senderChatId);
+}
+
+async function updateLastMassDmBatch(senderChatId, updates = {}) {
+  await ensureSheetHeader('massDmHistory', HEADERS.massDmHistory);
+  const sender = String(senderChatId || '').trim();
+  if (!sender) {
+    throw new Error('senderChatId is required to update mass DM history.');
+  }
+
+  const history = await getMassDmHistory();
+  const next = [];
+  let updatedRow = null;
+
+  for (const row of history) {
+    if (row.senderChatId !== sender) {
+      next.push(row);
+      continue;
+    }
+
+    const merged = {
+      ...row,
+      ...updates,
+      senderChatId: sender,
+    };
+
+    if (Array.isArray(merged.deliveries) && merged.deliveries.length) {
+      next.push(merged);
+      updatedRow = merged;
+    }
+  }
+
+  await replaceDatasetRows(
+    'massDmHistory',
+    next.map((row) => toMassDmHistoryRow(row))
+  );
+
+  return updatedRow;
+}
+
+async function clearLastMassDmBatch(senderChatId) {
+  await ensureSheetHeader('massDmHistory', HEADERS.massDmHistory);
+  const sender = String(senderChatId || '').trim();
+  const history = await getMassDmHistory();
+  const remaining = history.filter((row) => row.senderChatId !== sender);
+
+  await replaceDatasetRows(
+    'massDmHistory',
+    remaining.map((row) => toMassDmHistoryRow(row))
+  );
+
+  return { removed: history.length - remaining.length };
 }
 
 async function recordProfileUpdate(identifier, username = '', editedAt = new Date().toISOString()) {
@@ -1940,6 +2091,11 @@ module.exports = {
   getKnownUsers,
   findKnownUser,
   canAttemptUserContact,
+  getMassDmHistory,
+  getLastMassDmBatch,
+  saveLastMassDmBatch,
+  updateLastMassDmBatch,
+  clearLastMassDmBatch,
   getProfileUpdateHistory,
   getProfileEditAllowance,
   recordProfileUpdate,
