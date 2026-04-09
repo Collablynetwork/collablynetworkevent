@@ -408,6 +408,13 @@ bot.onText(/\/massdm(?:\s+(.+))?/, async (msg, match) => {
 
 bot.onText(/\/removelastmassdm/, async msg => {
   if (!(await ensureNotBlockedMessage(msg))) return;
+  if (typeof chatHandler.handleRemoveLastMassDmCommand !== 'function') {
+    await bot.sendMessage(
+      msg.chat.id,
+      '⚠️ /removelastmassdm is not available in this running build yet. Restart or redeploy the latest handlers/chatHandler.js and try again.'
+    );
+    return;
+  }
   await chatHandler.handleRemoveLastMassDmCommand(msg, bot);
 });
 
