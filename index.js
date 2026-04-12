@@ -289,7 +289,12 @@ bot.on('callback_query', async query => {
     }
 
     // 1) Match flow FIRST (prefixes used in your matchHandler)
-    if (data.startsWith('send_req_') || data.startsWith('accept_') || data.startsWith('decline_')) {
+    if (
+      data.startsWith('send_req_') ||
+      data.startsWith('accept_') ||
+      data.startsWith('decline_') ||
+      data.startsWith('admin_match_')
+    ) {
       await matchHandler.handleCallback(query, bot);
       return;
     }

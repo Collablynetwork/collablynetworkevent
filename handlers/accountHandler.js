@@ -93,6 +93,30 @@ function arrFromMaybeSet(v) {
   return [];
 }
 
+function normalizeComparableSelection(value) {
+  return arrFromMaybeSet(value)
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function haveSameSelections(left, right) {
+  const normalizedLeft = normalizeComparableSelection(left);
+  const normalizedRight = normalizeComparableSelection(right);
+
+  if (normalizedLeft.length !== normalizedRight.length) return false;
+  return normalizedLeft.every((value, index) => value === normalizedRight[index]);
+}
+
+function shouldRefreshMatchesForProfileUpdate(previousProfile, nextProfile) {
+  if (!previousProfile) return true;
+
+  return !(
+    haveSameSelections(previousProfile.categories, nextProfile.categories) &&
+    haveSameSelections(previousProfile.lookingFor, nextProfile.lookingFor)
+  );
+}
+
 function statusLabel(s) {
   const v = String(s || "").toLowerCase();
   return v === NOTIF_MUTED ? "🔕 Notification switched OFF" : "🔔 Notification switched ON";
@@ -197,6 +221,11 @@ async function startEditProfile(msg, bot) {
   }
   initFlow(chatId, "edit", me);
   sessions[chatId].data.username = me.username || "";
+  sessions[chatId].originalData = {
+    ...me,
+    categories: arrFromMaybeSet(me.categories),
+    lookingFor: arrFromMaybeSet(me.lookingFor),
+  };
   await bot.sendMessage(chatId, "✏️ Let’s update your profile.");
   await askField(chatId, bot);
 }
@@ -296,6 +325,7 @@ async function handleCallbackQuery(query, bot) {
 async function finalizeFlow(chatId, bot) {
   const session = sessions[chatId];
   const data    = session.data;
+  const originalProfile = session.originalData || null;
 
   const cats  = arrFromMaybeSet(data.categories);
   const looks = arrFromMaybeSet(data.lookingFor);
@@ -361,10 +391,16 @@ async function finalizeFlow(chatId, bot) {
     await bot.sendMessage(chatId, buildPostEditLimitMessage(allowanceAfterSave));
   }
 
-  const matches = await matchService.findMatches(profile);
-  for (const m of matches) {
-    if (Number(m.chatId) !== chatId) {
-      await notifyService.notifyUser(bot, m.chatId, profile);
+  const shouldRefreshMatches =
+    session.mode === "register" ||
+    shouldRefreshMatchesForProfileUpdate(originalProfile, profile);
+
+  if (shouldRefreshMatches) {
+    const matches = await matchService.findMatches(profile);
+    for (const m of matches) {
+      if (Number(m.chatId) !== chatId) {
+        await notifyService.notifyUser(bot, m.chatId, profile);
+      }
     }
   }
 

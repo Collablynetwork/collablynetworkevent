@@ -250,7 +250,10 @@ function buildRequestsEnrichedRows(users, requests) {
 function buildPendingConnectionsRows(users, requests) {
   const enriched = buildRequestsEnrichedRows(
     users,
-    requests.filter((request) => String(request.status || '').toLowerCase() === 'pending')
+    requests.filter((request) => {
+      const status = String(request.status || '').toLowerCase();
+      return status === 'pending' || status === 'admin_pending';
+    })
   );
 
   return {

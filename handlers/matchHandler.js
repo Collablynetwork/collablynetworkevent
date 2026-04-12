@@ -2,7 +2,6 @@
 'use strict';
 
 const storage = require("../services/storage");
-const { ADMIN_CHAT_IDS } = require("../config");
 const matchService = require("../services/matchmaking");
 const notification = require("../services/notification");
 const reachability = require("../services/reachability");
@@ -64,6 +63,16 @@ function normalizeRequests(rows = []) {
       status: String(r.status || "").toLowerCase(),
     };
   });
+}
+
+function normalizeRequestStatus(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function hasBlockingRelationshipStatus(value = '') {
+  return ['pending', 'accepted', 'admin_pending'].includes(
+    normalizeRequestStatus(value)
+  );
 }
 
 async function saveContactFlex(fromId, toId, ts) {
@@ -139,7 +148,7 @@ function formatAdminProfileBlock(p = {}, cat, lookingForCat) {
   );
 }
 
-function formatRevealCard(who = {}, viewer = {}, adminTg) {
+function formatRevealCard(who = {}, viewer = {}) {
   const projectName = escapeMDV2(who.projectName || "N/A");
   const xLink = who.xUrl
     ? linkMDV2("X link", getLatestTwitterProfileLink(who.xUrl))
@@ -151,9 +160,7 @@ function formatRevealCard(who = {}, viewer = {}, adminTg) {
   const projCats = projCatsArr.map(escapeMDV2).join(", ");
   const lookingFor = lookingForArr.map(escapeMDV2).join(", ");
 
-  const tg = adminTg
-    ? `@${escapeMDV2(String(adminTg).replace(/^@/, ""))}`
-    : who.username
+  const tg = who.username
     ? `@${escapeMDV2(String(who.username).replace(/^@/, ""))}`
     : escapeMDV2("N/A");
 
@@ -165,6 +172,53 @@ function formatRevealCard(who = {}, viewer = {}, adminTg) {
     `🔹 *Project Category:* ${projCats || escapeMDV2("N/A")}\n` +
     `🔹 *Project is looking for:* ${lookingFor || escapeMDV2("N/A")}\n` +
     `🔹 *Telegram:* ${tg}`
+  );
+}
+
+function parseAdminMatchCallback(data = '') {
+  const match = String(data || '').match(
+    /^admin_match_(approve|reject)_(-?\d+)_(-?\d+)$/
+  );
+  if (!match) return null;
+
+  return {
+    action: match[1],
+    fromId: String(match[2] || ''),
+    toId: String(match[3] || ''),
+  };
+}
+
+async function setInlineButtonState(bot, message, text) {
+  if (!message?.chat?.id || !message?.message_id) return;
+
+  try {
+    await bot.editMessageReplyMarkup(
+      {
+        inline_keyboard: [[{ text, callback_data: 'noop' }]],
+      },
+      { chat_id: message.chat.id, message_id: message.message_id }
+    );
+  } catch (error) {
+    if (!/message is not modified/i.test(String(error?.message || error))) {
+      throw error;
+    }
+  }
+}
+
+async function sendApprovedConnectionNotice(bot, recipientId, counterpartProfile, viewerProfile) {
+  await bot.sendMessage(
+    Number(recipientId),
+    `${escapeMDV2("✅ Admin approved this match. You are now connected.")}\n\n` +
+      formatRevealCard(counterpartProfile, viewerProfile),
+    {
+      parse_mode: "MarkdownV2",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "💬 Message in Bot", callback_data: `chat_open_${counterpartProfile.chatId}` },
+        ]],
+      },
+    }
   );
 }
 
@@ -256,8 +310,8 @@ async function handleMatchCommand(msg, bot) {
     const relationshipIds = new Set(
       requests
         .filter((request) => {
-          const status = String(request.status || '').toLowerCase();
-          if (status !== 'pending' && status !== 'accepted') return false;
+          const status = normalizeRequestStatus(request.status);
+          if (!hasBlockingRelationshipStatus(status)) return false;
 
           return (
             (request.from === String(chatId) || request.to === String(chatId))
@@ -308,6 +362,138 @@ async function handleCallback(query, bot) {
   const me   = String(query.from.id);
   const msg  = query.message;
 
+  const adminAction = parseAdminMatchCallback(data);
+  if (adminAction) {
+    const { action, fromId, toId } = adminAction;
+
+    try {
+      const latestRequest = await storage.getLatestRequestBetween(fromId, toId);
+      const latestStatus = normalizeRequestStatus(latestRequest?.status);
+
+      if (latestStatus !== 'admin_pending') {
+        const label =
+          latestStatus === 'accepted'
+            ? '✅ Approved'
+            : latestStatus === 'admin_rejected'
+              ? '❌ Rejected'
+              : 'ℹ️ Already processed';
+        await setInlineButtonState(bot, msg, label);
+        await bot.answerCallbackQuery(query.id, {
+          text:
+            latestStatus === 'accepted'
+              ? 'This match has already been approved.'
+              : latestStatus === 'admin_rejected'
+                ? 'This match has already been rejected.'
+                : 'This match is no longer awaiting admin approval.',
+        });
+        return;
+      }
+
+      if (action === 'reject') {
+        await storage.upsertRequestStatus(fromId, toId, 'admin_rejected');
+        await setInlineButtonState(bot, msg, '❌ Rejected');
+        await bot.answerCallbackQuery(query.id, { text: '❌ Match rejected.' });
+        return;
+      }
+
+      const sourceProfile = await storage.getSingleUser(fromId);
+      const targetProfile = await storage.getSingleUser(toId);
+      if (!sourceProfile || !targetProfile) {
+        await bot.answerCallbackQuery(query.id, {
+          text: '❌ One of these profiles no longer exists.',
+          show_alert: true,
+        });
+        return;
+      }
+
+      const [sourceAvailability, targetAvailability] = await Promise.all([
+        storage.canAttemptUserContact(sourceProfile),
+        storage.canAttemptUserContact(targetProfile),
+      ]);
+
+      if (!sourceAvailability.ok || !targetAvailability.ok) {
+        await bot.answerCallbackQuery(query.id, {
+          text: '⚠️ One of these users is blocked, inactive, or unreachable right now.',
+          show_alert: true,
+        });
+        return;
+      }
+
+      const approvalKeywords = await matchService.getAdminApprovalKeywords();
+      const approvalState = matchService.getMatchApprovalState(
+        sourceProfile,
+        targetProfile,
+        approvalKeywords
+      );
+      const stillMutual =
+        approvalState.sourceToTarget.builds.length > 0 &&
+        approvalState.sourceToTarget.needs.length > 0;
+
+      if (!stillMutual) {
+        await storage.upsertRequestStatus(fromId, toId, 'admin_rejected');
+        await setInlineButtonState(bot, msg, '❌ No Longer Matching');
+        await bot.answerCallbackQuery(query.id, {
+          text: '❌ These profiles no longer match.',
+          show_alert: true,
+        });
+        return;
+      }
+
+      const ts = new Date().toISOString();
+      await storage.upsertRequestStatus(fromId, toId, 'accepted', ts);
+      if (!(await storage.hasContactBetween(fromId, toId))) {
+        await saveContactFlex(fromId, toId, ts);
+        await saveContactFlex(toId, fromId, ts);
+      }
+
+      const notificationFailures = [];
+
+      try {
+        await sendApprovedConnectionNotice(bot, fromId, targetProfile, sourceProfile);
+      } catch (error) {
+        if (reachability.isTelegramUnavailableError(error)) {
+          await reachability.markTelegramUnavailable(fromId, {
+            username: sourceProfile.username,
+            reason: reachability.getTelegramUnavailableReason(error),
+            error,
+          });
+          notificationFailures.push(fromId);
+        } else {
+          throw error;
+        }
+      }
+
+      try {
+        await sendApprovedConnectionNotice(bot, toId, sourceProfile, targetProfile);
+      } catch (error) {
+        if (reachability.isTelegramUnavailableError(error)) {
+          await reachability.markTelegramUnavailable(toId, {
+            username: targetProfile.username,
+            reason: reachability.getTelegramUnavailableReason(error),
+            error,
+          });
+          notificationFailures.push(toId);
+        } else {
+          throw error;
+        }
+      }
+
+      await setInlineButtonState(bot, msg, '✅ Approved');
+      await bot.answerCallbackQuery(query.id, {
+        text: notificationFailures.length
+          ? 'Approved, but one user could not be notified.'
+          : '✅ Match approved and users notified.',
+      });
+    } catch (err) {
+      console.error("Error handling admin match approval:", err);
+      await bot.answerCallbackQuery(query.id, {
+        text: "❌ Admin action failed.",
+        show_alert: true,
+      });
+    }
+    return;
+  }
+
   // 1) Send Request (no username reveal here)
   if (data.startsWith("send_req_")) {
     const target = data.split("_")[2];
@@ -355,32 +541,32 @@ async function handleCallback(query, bot) {
         }
       }
 
-      // Get all requests to dedupe
-      const existing = normalizeRequests(await storage.getRequests());
-      const pendingExists = existing.some(
-        (r) => r.from === me && r.to === String(target) && r.status === "pending"
-      );
-      if (!pendingExists) {
-        await storage.saveRequest([me, String(target), "pending", new Date().toISOString()]);
-      }
-
-      // Flip button to “Request Sent”
-      if (msg?.chat?.id && msg?.message_id) {
-        try {
-          await bot.editMessageReplyMarkup(
-            { inline_keyboard: [[{ text: "✅ Request Sent", callback_data: "noop" }]] },
-            { chat_id: msg.chat.id, message_id: msg.message_id }
-          );
-        } catch (e) {
-          // If "message is not modified", ignore quietly
-          if (!/message is not modified/i.test(String(e?.description || e?.message || ""))) {
-            console.warn("editMessageReplyMarkup warn:", e?.message || e);
-          }
+      const latestRequest = await storage.getLatestRequestBetween(me, target);
+      if (latestRequest && hasBlockingRelationshipStatus(latestRequest.status)) {
+        const existingStatus = normalizeRequestStatus(latestRequest.status);
+        if (existingStatus === 'accepted') {
+          await setInlineButtonState(bot, msg, '✅ Connected');
+        } else if (existingStatus === 'admin_pending') {
+          await setInlineButtonState(bot, msg, '🛡️ Under Admin Review');
+        } else {
+          await setInlineButtonState(bot, msg, '✅ Request Sent');
         }
+        await bot.answerCallbackQuery(query.id, {
+          text:
+            existingStatus === 'accepted'
+              ? 'You are already connected with this user.'
+              : existingStatus === 'admin_pending'
+                ? 'This match is already under admin review.'
+                : 'You already sent a request to this user.',
+          show_alert: true,
+        });
+        return;
       }
 
       // If target hasn't registered/started the bot, we cannot DM them → queue it and tell requester how to invite
       if (!targetProfile) {
+        await storage.upsertRequestStatus(me, String(target), "pending");
+        await setInlineButtonState(bot, msg, "✅ Request Sent");
         const meInfo = await bot.getMe();
         const deepLink = `https://t.me/${meInfo.username}?start=${me}`;
         await bot.answerCallbackQuery(query.id, { text: "✅ Request queued" });
@@ -392,6 +578,31 @@ async function handleCallback(query, bot) {
         );
         return;
       }
+
+      const approvalKeywords = await matchService.getAdminApprovalKeywords();
+      const approvalState = matchService.getMatchApprovalState(
+        requester,
+        targetProfile,
+        approvalKeywords
+      );
+
+      if (approvalState.requiresAdminApproval) {
+        await storage.upsertRequestStatus(me, String(target), "admin_pending");
+        await notification.notifyAdminsForApproval(
+          bot,
+          requester,
+          targetProfile,
+          approvalState
+        );
+        await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
+        await bot.answerCallbackQuery(query.id, {
+          text: "🛡️ This match was sent for admin approval.",
+        });
+        return;
+      }
+
+      await storage.upsertRequestStatus(me, String(target), "pending");
+      await setInlineButtonState(bot, msg, "✅ Request Sent");
 
       // Target exists → DM with preview and Accept/Decline
       await bot.answerCallbackQuery(query.id, { text: "✅ Request sent!" });
@@ -470,13 +681,39 @@ async function handleCallback(query, bot) {
         return;
       }
 
-      // Update storage
-      if (typeof storage.updateRequestStatus === "function") {
-        await storage.updateRequestStatus(otherId, me, status);
-      } else {
-        // Fallback: save another row (not ideal, but avoids crash)
-        await storage.saveRequest([otherId, me, status, new Date().toISOString()]);
+      const approvalKeywords = await matchService.getAdminApprovalKeywords();
+      const approvalState = matchService.getMatchApprovalState(
+        requesterProfile,
+        actorProfile,
+        approvalKeywords
+      );
+      const latestRelationship = await storage.getLatestRequestBetween(otherId, me);
+      const latestRelationshipStatus = normalizeRequestStatus(latestRelationship?.status);
+
+      if (latestRelationshipStatus === 'admin_pending') {
+        await bot.answerCallbackQuery(query.id, {
+          text: "🛡️ This match is already under admin review.",
+        });
+        await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
+        return;
       }
+
+      if (status === "accepted" && approvalState.requiresAdminApproval) {
+        await storage.upsertRequestStatus(otherId, me, "admin_pending");
+        await notification.notifyAdminsForApproval(
+          bot,
+          requesterProfile,
+          actorProfile,
+          approvalState
+        );
+        await bot.answerCallbackQuery(query.id, {
+          text: "🛡️ This match now needs admin approval.",
+        });
+        await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
+        return;
+      }
+
+      await storage.upsertRequestStatus(otherId, me, status);
 
       // Acknowledge tap
       await bot.answerCallbackQuery(query.id, {
@@ -484,20 +721,11 @@ async function handleCallback(query, bot) {
       });
 
       // Flip local markup
-      if (msg?.chat?.id && msg?.message_id) {
-        try {
-          await bot.editMessageReplyMarkup(
-            {
-              inline_keyboard: [[{ text: status === "accepted" ? "✅ Accepted" : "❌ Declined", callback_data: "noop" }]],
-            },
-            { chat_id: msg.chat.id, message_id: msg.message_id }
-          );
-        } catch (e) {
-          if (!/message is not modified/i.test(String(e?.description || e?.message || ""))) {
-            console.warn("editMessageReplyMarkup warn:", e?.message || e);
-          }
-        }
-      }
+      await setInlineButtonState(
+        bot,
+        msg,
+        status === "accepted" ? "✅ Accepted" : "❌ Declined"
+      );
 
       if (status === "accepted") {
         const ts = new Date().toISOString();
@@ -506,58 +734,14 @@ async function handleCallback(query, bot) {
         await saveContactFlex(me, otherId, ts);
         await saveContactFlex(otherId, me, ts);
 
-        // Compute matched intersections (both directions)
-        const actorProjMatches = matchedProjectCategories(actorProfile, requesterProfile) || [];
-        const actorLFMatches   = matchedLookingFor(actorProfile, requesterProfile) || [];
-        const reqProjMatches   = matchedProjectCategories(requesterProfile, actorProfile) || [];
-        const reqLFMatches     = matchedLookingFor(requesterProfile, actorProfile) || [];
-        const approvalKeywords = await matchService.getAdminApprovalKeywords();
-
-        const anyApproved = (arr) =>
-          Array.isArray(arr) &&
-          matchService.hasAdminApprovalKeyword(arr, approvalKeywords);
-
-        const isAdminApprovedMatch =
-          anyApproved(actorProjMatches) ||
-          anyApproved(actorLFMatches) ||
-          anyApproved(reqProjMatches) ||
-          anyApproved(reqLFMatches);
-
-        const ADMIN_TG = matchService.ADMIN_TELEGRAM;
-        const adminChatIds = ADMIN_CHAT_IDS.length ? ADMIN_CHAT_IDS : [481129098];
-
         // Build mirrored reveal cards
         const toRequester =
           `${escapeMDV2("🎉 Your request has been accepted!")}\n\n` +
-          (isAdminApprovedMatch
-            ? formatRevealCard(actorProfile, requesterProfile, ADMIN_TG)
-            : formatRevealCard(actorProfile, requesterProfile));
+          formatRevealCard(actorProfile, requesterProfile);
 
         const toAcceptor =
           `${escapeMDV2("🤝 Connection confirmed!")}\n\n` +
-          (isAdminApprovedMatch
-            ? formatRevealCard(requesterProfile, actorProfile, ADMIN_TG)
-            : formatRevealCard(requesterProfile, actorProfile));
-
-        // Notify admin if premium match
-        if (isAdminApprovedMatch) {
-          const toAdmin =
-            `${escapeMDV2("Premium categories are matched. Here are the profiles:")}\n\n` +
-            formatAdminProfileBlock(actorProfile, actorProjMatches, actorLFMatches) +
-            `\n\n` +
-            formatAdminProfileBlock(requesterProfile, reqProjMatches, reqLFMatches);
-
-          try {
-            for (const adminChatId of adminChatIds) {
-              await bot.sendMessage(adminChatId, toAdmin, {
-                parse_mode: "MarkdownV2",
-                disable_web_page_preview: true,
-              });
-            }
-          } catch (e) {
-            console.warn("Admin notify failed:", e?.message || e);
-          }
-        }
+          formatRevealCard(requesterProfile, actorProfile);
 
         // Notify both parties
         try {
