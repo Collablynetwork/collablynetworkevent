@@ -172,6 +172,22 @@ async function pruneOutdatedContactsAfterProfileUpdate(profile) {
   };
 }
 
+async function notifyAllMatchedProfiles(bot, profile, matches = []) {
+  const myChatId = Number(profile?.chatId);
+  const seen = new Set();
+
+  for (const match of Array.isArray(matches) ? matches : []) {
+    const matchChatId = Number(match?.chatId);
+    if (!matchChatId || matchChatId === myChatId || seen.has(matchChatId)) {
+      continue;
+    }
+    seen.add(matchChatId);
+
+    await notifyService.notifyUser(bot, matchChatId, profile);
+    await notifyService.notifyUser(bot, myChatId, match);
+  }
+}
+
 function statusLabel(s) {
   const v = String(s || "").toLowerCase();
   return v === NOTIF_MUTED ? "🔕 Notification switched OFF" : "🔔 Notification switched ON";
@@ -468,11 +484,7 @@ async function finalizeFlow(chatId, bot) {
 
   if (shouldRefreshMatches) {
     const matches = await matchService.findMatches(profile);
-    for (const m of matches) {
-      if (Number(m.chatId) !== chatId) {
-        await notifyService.notifyUser(bot, m.chatId, profile);
-      }
-    }
+    await notifyAllMatchedProfiles(bot, profile, matches);
   }
 
   delete sessions[chatId];
