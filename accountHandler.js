@@ -483,7 +483,7 @@ async function finalizeFlow(chatId, bot) {
     shouldRefreshMatchesForProfileUpdate(originalProfile, profile);
 
   if (shouldRefreshMatches) {
-    const matches = await matchService.findMatches(profile);
+    const matches = await matchService.findNotificationMatches(profile);
     await notifyAllMatchedProfiles(bot, profile, matches);
   }
 
