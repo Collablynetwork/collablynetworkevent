@@ -607,7 +607,7 @@ async function handleCallback(query, bot) {
         if (existingStatus === 'accepted') {
           await setInlineButtonState(bot, msg, '✅ Connected');
         } else if (existingStatus === 'admin_pending') {
-          await setInlineButtonState(bot, msg, '🛡️ Under Admin Review');
+          await setInlineButtonState(bot, msg, '✅ Request Sent');
         } else {
           await setInlineButtonState(bot, msg, '✅ Request Sent');
         }
@@ -615,9 +615,7 @@ async function handleCallback(query, bot) {
           text:
             existingStatus === 'accepted'
               ? 'You are already connected with this user.'
-              : existingStatus === 'admin_pending'
-                ? 'This match is already under admin review.'
-                : 'You already sent a request to this user.',
+              : 'You already sent a request to this user.',
           show_alert: true,
         });
         return;
@@ -730,9 +728,9 @@ async function handleCallback(query, bot) {
 
       if (latestRelationshipStatus === 'admin_pending') {
         await bot.answerCallbackQuery(query.id, {
-          text: "🛡️ This match is already under admin review.",
+          text: "✅ Request sent.",
         });
-        await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
+        await setInlineButtonState(bot, msg, "✅ Request Sent");
         return;
       }
 
@@ -745,9 +743,9 @@ async function handleCallback(query, bot) {
           approvalState
         );
         await bot.answerCallbackQuery(query.id, {
-          text: "✅ Accepted",
+          text: "✅ Request sent.",
         });
-        await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
+        await setInlineButtonState(bot, msg, "✅ Request Sent");
         return;
       }
 
