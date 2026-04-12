@@ -172,7 +172,7 @@ async function pruneOutdatedContactsAfterProfileUpdate(profile) {
   };
 }
 
-async function notifyAllMatchedProfiles(bot, profile, matches = []) {
+async function notifyExistingMatchedProfiles(bot, profile, matches = []) {
   const myChatId = Number(profile?.chatId);
   const seen = new Set();
 
@@ -184,7 +184,6 @@ async function notifyAllMatchedProfiles(bot, profile, matches = []) {
     seen.add(matchChatId);
 
     await notifyService.notifyUser(bot, matchChatId, profile);
-    await notifyService.notifyUser(bot, myChatId, match);
   }
 }
 
@@ -484,7 +483,7 @@ async function finalizeFlow(chatId, bot) {
 
   if (shouldRefreshMatches) {
     const matches = await matchService.findNotificationMatches(profile);
-    await notifyAllMatchedProfiles(bot, profile, matches);
+    await notifyExistingMatchedProfiles(bot, profile, matches);
   }
 
   delete sessions[chatId];
