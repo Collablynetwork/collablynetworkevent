@@ -1,7 +1,6 @@
 const storage = require("../services/storage");
 const { ADMIN_CHAT_IDS } = require("../config");
 const { getLatestTwitterProfileLink } = require("../utils");
-const matchService = require("./matchmaking");
 const reachability = require("./reachability");
 
 function escapeHtml(value = "") {
@@ -204,23 +203,6 @@ async function notifyUser(bot, userId, newProfile) {
         matchedLookingFor.join(", ")
       )}`
     );
-  }
-
-  const approvalKeywords = await matchService.getAdminApprovalKeywords();
-  const approvalState = matchService.getMatchApprovalState(
-    newProfile,
-    user,
-    approvalKeywords
-  );
-
-  if (approvalState.requiresAdminApproval) {
-    await storage.upsertRequestStatus(
-      String(newProfile.chatId || ""),
-      String(userId || ""),
-      "admin_pending"
-    );
-    await notifyAdminsForApproval(bot, newProfile, user, approvalState);
-    return;
   }
 
   const text = [

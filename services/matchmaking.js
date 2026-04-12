@@ -172,8 +172,48 @@ async function findMatches(newProfile) {
   return matches;
 }
 
+async function findNotificationMatches(newProfile) {
+  if (await storage.isBlockedUser(newProfile.chatId, newProfile.username)) {
+    return [];
+  }
+  if (!storage.isActiveUserStatus(newProfile.status)) {
+    return [];
+  }
+
+  const users = await storage.getUsers();
+  const myCategories = normalizeList(newProfile.categories);
+  const myLookingFor = normalizeList(newProfile.lookingFor);
+  const matches = [];
+
+  for (const user of users) {
+    if (user.chatId === newProfile.chatId) continue;
+
+    const candidateAvailability = await storage.canAttemptUserContact(user);
+    if (!candidateAvailability.ok) continue;
+
+    const theirCategories = normalizeList(user.categories);
+    const theirLookingFor = normalizeList(user.lookingFor);
+
+    const theyWantWhatIBuild = theirLookingFor.some((cat) =>
+      myCategories.includes(cat)
+    );
+    const theyProvideWhatIWant = theirCategories.some((cat) =>
+      myLookingFor.includes(cat)
+    );
+
+    if (!theyWantWhatIBuild && !theyProvideWhatIWant) {
+      continue;
+    }
+
+    matches.push(user);
+  }
+
+  return matches;
+}
+
 module.exports = {
   findMatches,
+  findNotificationMatches,
   DEFAULT_ADMIN_APPROVAL_KEYWORDS,
   ADMIN_TELEGRAM,
   hydrateAdminApprovalKeywords,

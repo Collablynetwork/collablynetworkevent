@@ -642,6 +642,75 @@ async function hasContactBetween(chatIdA, chatIdB) {
   });
 }
 
+async function removeContactRelationship(chatIdA, chatIdB) {
+  await ensureSheetHeader('contacts', HEADERS.contacts);
+
+  const left = String(chatIdA || '').trim();
+  const right = String(chatIdB || '').trim();
+  if (!left || !right) {
+    return { removed: 0 };
+  }
+
+  const rows = await getRows('contacts');
+  const [header, ...data] = rows;
+  const remaining = data.filter((row) => {
+    const from = String(row[0] || '').trim();
+    const to = String(row[1] || '').trim();
+
+    return !(
+      (from === left && to === right) ||
+      (from === right && to === left)
+    );
+  });
+
+  await replaceSheetData('contacts', [header, ...remaining]);
+
+  return {
+    removed: data.length - remaining.length,
+  };
+}
+
+async function removeOpenRequestsBetween(chatIdA, chatIdB) {
+  await ensureSheetHeader('requests', HEADERS.requests);
+
+  const left = String(chatIdA || '').trim();
+  const right = String(chatIdB || '').trim();
+  if (!left || !right) {
+    return { removed: 0 };
+  }
+
+  const rows = await getRows('requests');
+  const [header, ...data] = rows;
+  const remaining = data.filter((row) => {
+    const from = String(row[0] || '').trim();
+    const to = String(row[1] || '').trim();
+    const status = normalizeRequestStatus(row[2]);
+    const isPair =
+      (from === left && to === right) ||
+      (from === right && to === left);
+
+    return !(isPair && isOpenRequestStatus(status));
+  });
+
+  await replaceSheetData('requests', [header, ...remaining]);
+
+  return {
+    removed: data.length - remaining.length,
+  };
+}
+
+async function clearMatchRelationship(chatIdA, chatIdB) {
+  const [contactsResult, requestsResult] = await Promise.all([
+    removeContactRelationship(chatIdA, chatIdB),
+    removeOpenRequestsBetween(chatIdA, chatIdB),
+  ]);
+
+  return {
+    removedContacts: Number(contactsResult?.removed || 0),
+    removedRequests: Number(requestsResult?.removed || 0),
+  };
+}
+
 /* ==========================
    Requests
    ========================== */
@@ -2205,6 +2274,9 @@ module.exports = {
   getContacts,
   getContactsFor,
   hasContactBetween,
+  removeContactRelationship,
+  removeOpenRequestsBetween,
+  clearMatchRelationship,
   getApprovalKeywords,
   addApprovalKeyword,
   removeApprovalKeyword,

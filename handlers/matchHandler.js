@@ -222,6 +222,27 @@ async function sendApprovedConnectionNotice(bot, recipientId, counterpartProfile
   );
 }
 
+async function safeSendStatusMessage(bot, recipientId, text, username = '') {
+  try {
+    await bot.sendMessage(Number(recipientId), text, {
+      parse_mode: "MarkdownV2",
+      disable_web_page_preview: true,
+    });
+  } catch (error) {
+    if (reachability.isTelegramUnavailableError(error)) {
+      await reachability.markTelegramUnavailable(recipientId, {
+        username,
+        reason: reachability.getTelegramUnavailableReason(error),
+        error,
+      });
+      return false;
+    }
+    throw error;
+  }
+
+  return true;
+}
+
 /* ================= Core flows ================= */
 
 // After registration completes, trigger notifications to potential matches
@@ -391,6 +412,28 @@ async function handleCallback(query, bot) {
 
       if (action === 'reject') {
         await storage.upsertRequestStatus(fromId, toId, 'admin_rejected');
+        const sourceProfile = await storage.getSingleUser(fromId);
+        const targetProfile = await storage.getSingleUser(toId);
+        const rejectionText = escapeMDV2(
+          "❌ This match could not be approved by admin, so profile details cannot be shared."
+        );
+
+        if (sourceProfile) {
+          await safeSendStatusMessage(
+            bot,
+            fromId,
+            rejectionText,
+            sourceProfile.username
+          );
+        }
+        if (targetProfile) {
+          await safeSendStatusMessage(
+            bot,
+            toId,
+            rejectionText,
+            targetProfile.username
+          );
+        }
         await setInlineButtonState(bot, msg, '❌ Rejected');
         await bot.answerCallbackQuery(query.id, { text: '❌ Match rejected.' });
         return;
@@ -579,28 +622,6 @@ async function handleCallback(query, bot) {
         return;
       }
 
-      const approvalKeywords = await matchService.getAdminApprovalKeywords();
-      const approvalState = matchService.getMatchApprovalState(
-        requester,
-        targetProfile,
-        approvalKeywords
-      );
-
-      if (approvalState.requiresAdminApproval) {
-        await storage.upsertRequestStatus(me, String(target), "admin_pending");
-        await notification.notifyAdminsForApproval(
-          bot,
-          requester,
-          targetProfile,
-          approvalState
-        );
-        await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
-        await bot.answerCallbackQuery(query.id, {
-          text: "🛡️ This match was sent for admin approval.",
-        });
-        return;
-      }
-
       await storage.upsertRequestStatus(me, String(target), "pending");
       await setInlineButtonState(bot, msg, "✅ Request Sent");
 
@@ -707,7 +728,7 @@ async function handleCallback(query, bot) {
           approvalState
         );
         await bot.answerCallbackQuery(query.id, {
-          text: "🛡️ This match now needs admin approval.",
+          text: "✅ Accepted",
         });
         await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
         return;

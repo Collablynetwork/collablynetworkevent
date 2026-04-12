@@ -1,0 +1,20 @@
+{
+  "name": "eventpartner-main",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "import:users": "node scripts/importUsers.js",
+    "import:workbook": "node scripts/importWorkbook.js",
+    "import:google": "node scripts/importGoogleSheet.js"
+  },
+  "dependencies": {
+    "canvas": "^2.11.2",
+    "dotenv": "^16.5.0",
+    "googleapis": "^148.0.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "qrcode": "^1.5.4",
+    "sqlite3": "^5.1.7",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -117,6 +117,77 @@ function shouldRefreshMatchesForProfileUpdate(previousProfile, nextProfile) {
   );
 }
 
+async function pruneOutdatedContactsAfterProfileUpdate(profile) {
+  const chatId = String(profile?.chatId || "").trim();
+  if (!chatId) {
+    return {
+      removedUsers: [],
+      removedContacts: 0,
+      removedRequests: 0,
+    };
+  }
+
+  const [contacts, users] = await Promise.all([
+    storage.getContactsFor(chatId),
+    storage.getUsers(),
+  ]);
+
+  const userByChatId = new Map(
+    users.map((user) => [String(user.chatId || "").trim(), user])
+  );
+  const seen = new Set();
+  const removedUsers = [];
+  let removedContacts = 0;
+  let removedRequests = 0;
+
+  for (const contact of contacts || []) {
+    const otherChatId = String(contact?.contactId || "").trim();
+    if (!otherChatId || seen.has(otherChatId)) continue;
+    seen.add(otherChatId);
+
+    const otherUser = userByChatId.get(otherChatId);
+    if (!otherUser) continue;
+
+    const approvalState = matchService.getMatchApprovalState(profile, otherUser);
+    const stillMutual =
+      approvalState.sourceToTarget.builds.length > 0 &&
+      approvalState.sourceToTarget.needs.length > 0;
+
+    if (stillMutual) continue;
+
+    const removal = await storage.clearMatchRelationship(chatId, otherChatId);
+    if (!removal.removedContacts && !removal.removedRequests) {
+      continue;
+    }
+
+    removedContacts += Number(removal.removedContacts || 0);
+    removedRequests += Number(removal.removedRequests || 0);
+    removedUsers.push(otherUser);
+  }
+
+  return {
+    removedUsers,
+    removedContacts,
+    removedRequests,
+  };
+}
+
+async function notifyAllMatchedProfiles(bot, profile, matches = []) {
+  const myChatId = Number(profile?.chatId);
+  const seen = new Set();
+
+  for (const match of Array.isArray(matches) ? matches : []) {
+    const matchChatId = Number(match?.chatId);
+    if (!matchChatId || matchChatId === myChatId || seen.has(matchChatId)) {
+      continue;
+    }
+    seen.add(matchChatId);
+
+    await notifyService.notifyUser(bot, matchChatId, profile);
+    await notifyService.notifyUser(bot, myChatId, match);
+  }
+}
+
 function statusLabel(s) {
   const v = String(s || "").toLowerCase();
   return v === NOTIF_MUTED ? "🔕 Notification switched OFF" : "🔔 Notification switched ON";
@@ -387,8 +458,24 @@ async function finalizeFlow(chatId, bot) {
     await storage.updateUser(row);
     await storage.recordProfileUpdate(profile);
 
+    let prunedRelationships = {
+      removedUsers: [],
+      removedContacts: 0,
+      removedRequests: 0,
+    };
+    if (shouldRefreshMatchesForProfileUpdate(originalProfile, profile)) {
+      prunedRelationships = await pruneOutdatedContactsAfterProfileUpdate(profile);
+    }
+
     const allowanceAfterSave = await storage.getProfileEditAllowance(profile);
-    await bot.sendMessage(chatId, buildPostEditLimitMessage(allowanceAfterSave));
+    const updateMessage = buildPostEditLimitMessage(allowanceAfterSave);
+    const removalLine = prunedRelationships.removedUsers.length
+      ? `Removed ${prunedRelationships.removedUsers.length} contact(s) that no longer match your updated profile.`
+      : "";
+    await bot.sendMessage(
+      chatId,
+      [updateMessage, removalLine].filter(Boolean).join("\n")
+    );
   }
 
   const shouldRefreshMatches =
@@ -396,12 +483,8 @@ async function finalizeFlow(chatId, bot) {
     shouldRefreshMatchesForProfileUpdate(originalProfile, profile);
 
   if (shouldRefreshMatches) {
-    const matches = await matchService.findMatches(profile);
-    for (const m of matches) {
-      if (Number(m.chatId) !== chatId) {
-        await notifyService.notifyUser(bot, m.chatId, profile);
-      }
-    }
+    const matches = await matchService.findNotificationMatches(profile);
+    await notifyAllMatchedProfiles(bot, profile, matches);
   }
 
   delete sessions[chatId];
