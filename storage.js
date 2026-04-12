@@ -157,6 +157,7 @@ function humanizeTelegramReachabilityStatus(status) {
 
 const PROFILE_UPDATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const PROFILE_UPDATE_LIMIT = 2;
+const OPEN_REQUEST_STATUSES = new Set(['pending', 'accepted', 'admin_pending']);
 
 function isActiveUserStatus(status) {
   const normalized = String(status || 'active').trim().toLowerCase();
@@ -167,6 +168,14 @@ function normalizeDataRow(row, width) {
   return Array.from({ length: width }, (_, index) =>
     String((Array.isArray(row) ? row[index] : '') || '').trim()
   );
+}
+
+function normalizeRequestStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isOpenRequestStatus(value) {
+  return OPEN_REQUEST_STATUSES.has(normalizeRequestStatus(value));
 }
 
 function countNonEmptyValues(values = []) {
@@ -633,6 +642,75 @@ async function hasContactBetween(chatIdA, chatIdB) {
   });
 }
 
+async function removeContactRelationship(chatIdA, chatIdB) {
+  await ensureSheetHeader('contacts', HEADERS.contacts);
+
+  const left = String(chatIdA || '').trim();
+  const right = String(chatIdB || '').trim();
+  if (!left || !right) {
+    return { removed: 0 };
+  }
+
+  const rows = await getRows('contacts');
+  const [header, ...data] = rows;
+  const remaining = data.filter((row) => {
+    const from = String(row[0] || '').trim();
+    const to = String(row[1] || '').trim();
+
+    return !(
+      (from === left && to === right) ||
+      (from === right && to === left)
+    );
+  });
+
+  await replaceSheetData('contacts', [header, ...remaining]);
+
+  return {
+    removed: data.length - remaining.length,
+  };
+}
+
+async function removeOpenRequestsBetween(chatIdA, chatIdB) {
+  await ensureSheetHeader('requests', HEADERS.requests);
+
+  const left = String(chatIdA || '').trim();
+  const right = String(chatIdB || '').trim();
+  if (!left || !right) {
+    return { removed: 0 };
+  }
+
+  const rows = await getRows('requests');
+  const [header, ...data] = rows;
+  const remaining = data.filter((row) => {
+    const from = String(row[0] || '').trim();
+    const to = String(row[1] || '').trim();
+    const status = normalizeRequestStatus(row[2]);
+    const isPair =
+      (from === left && to === right) ||
+      (from === right && to === left);
+
+    return !(isPair && isOpenRequestStatus(status));
+  });
+
+  await replaceSheetData('requests', [header, ...remaining]);
+
+  return {
+    removed: data.length - remaining.length,
+  };
+}
+
+async function clearMatchRelationship(chatIdA, chatIdB) {
+  const [contactsResult, requestsResult] = await Promise.all([
+    removeContactRelationship(chatIdA, chatIdB),
+    removeOpenRequestsBetween(chatIdA, chatIdB),
+  ]);
+
+  return {
+    removedContacts: Number(contactsResult?.removed || 0),
+    removedRequests: Number(requestsResult?.removed || 0),
+  };
+}
+
 /* ==========================
    Requests
    ========================== */
@@ -685,6 +763,41 @@ async function getRequests() {
   }));
 }
 
+async function getRequestsBetween(chatIdA, chatIdB) {
+  const left = String(chatIdA || '').trim();
+  const right = String(chatIdB || '').trim();
+  if (!left || !right) return [];
+
+  const requests = await getRequests();
+  return requests
+    .filter((request) => {
+      const from = String(request.from || '').trim();
+      const to = String(request.to || '').trim();
+      return (
+        (from === left && to === right) ||
+        (from === right && to === left)
+      );
+    })
+    .sort(
+      (a, b) => parseIsoTimestamp(b.timestamp) - parseIsoTimestamp(a.timestamp)
+    );
+}
+
+async function getLatestRequestBetween(chatIdA, chatIdB) {
+  const requests = await getRequestsBetween(chatIdA, chatIdB);
+  return requests[0] || null;
+}
+
+async function hasOpenRequestBetween(chatIdA, chatIdB, statuses = Array.from(OPEN_REQUEST_STATUSES)) {
+  const allowedStatuses = new Set(
+    (Array.isArray(statuses) ? statuses : [])
+      .map(normalizeRequestStatus)
+      .filter(Boolean)
+  );
+  const requests = await getRequestsBetween(chatIdA, chatIdB);
+  return requests.some((request) => allowedStatuses.has(normalizeRequestStatus(request.status)));
+}
+
 async function updateRequestStatus(from, to, newStatus) {
   await ensureSheetHeader('requests', HEADERS.requests);
   const rows = await getRows('requests');
@@ -707,6 +820,44 @@ async function updateRequestStatus(from, to, newStatus) {
   }
 
   throw new Error(`Request row not found for from=${fromStr}, to=${toStr}`);
+}
+
+async function upsertRequestStatus(from, to, newStatus, timestamp = new Date().toISOString()) {
+  await ensureSheetHeader('requests', HEADERS.requests);
+  const rows = await getRows('requests');
+  const fromStr = String(from || '').trim();
+  const toStr = String(to || '').trim();
+  const status = String(newStatus || '').trim();
+  const ts = String(timestamp || new Date().toISOString());
+
+  if (!fromStr || !toStr) {
+    throw new Error('Both from and to are required to upsert a request.');
+  }
+
+  for (let i = rows.length - 1; i >= 1; i -= 1) {
+    const row = rows[i] || [];
+    if (String(row[0] || '').trim() !== fromStr) continue;
+    if (String(row[1] || '').trim() !== toStr) continue;
+
+    const existingTimestamp = String(row[3] || '').trim() || ts;
+    await updateRow('requests', i, [fromStr, toStr, status, existingTimestamp]);
+    return {
+      from: fromStr,
+      to: toStr,
+      status,
+      timestamp: existingTimestamp,
+      updated: true,
+    };
+  }
+
+  await appendRow('requests', [fromStr, toStr, status, ts]);
+  return {
+    from: fromStr,
+    to: toStr,
+    status,
+    timestamp: ts,
+    updated: false,
+  };
 }
 
 async function getPendingRequests(forUser) {
@@ -2107,8 +2258,12 @@ module.exports = {
   // Requests
   saveRequest,
   getRequests,
+  getRequestsBetween,
+  getLatestRequestBetween,
+  hasOpenRequestBetween,
   getPendingRequests,
   updateRequestStatus,
+  upsertRequestStatus,
   getEventConnections,
   getEventConnection,
   createEventConnection,
@@ -2119,6 +2274,9 @@ module.exports = {
   getContacts,
   getContactsFor,
   hasContactBetween,
+  removeContactRelationship,
+  removeOpenRequestsBetween,
+  clearMatchRelationship,
   getApprovalKeywords,
   addApprovalKeyword,
   removeApprovalKeyword,
