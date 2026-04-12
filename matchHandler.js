@@ -75,6 +75,10 @@ function hasBlockingRelationshipStatus(value = '') {
   );
 }
 
+function hasAnyCurrentMatch(approvalState = {}) {
+  return Array.isArray(approvalState.matchedKeywords) && approvalState.matchedKeywords.length > 0;
+}
+
 async function saveContactFlex(fromId, toId, ts) {
   if (typeof storage.saveContact !== "function") return;
   // Try object shape first, then array shape
@@ -264,7 +268,7 @@ async function showIncomingOnlyLeads(chatId, bot) {
   return bot.sendMessage(
     chatId,
     escapeMDV2(
-      "📥 Leads are hidden for newly registered profiles. Existing matching users are notified first. You will get a direct bot message when someone sends you a proposal."
+      "📥 No leads available right now."
     ),
     { parse_mode: "MarkdownV2" }
   );
@@ -483,11 +487,9 @@ async function handleCallback(query, bot) {
         targetProfile,
         approvalKeywords
       );
-      const stillMutual =
-        approvalState.sourceToTarget.builds.length > 0 &&
-        approvalState.sourceToTarget.needs.length > 0;
+      const stillMatching = hasAnyCurrentMatch(approvalState);
 
-      if (!stillMutual) {
+      if (!stillMatching) {
         await storage.upsertRequestStatus(fromId, toId, 'admin_rejected');
         await setInlineButtonState(bot, msg, '❌ No Longer Matching');
         await bot.answerCallbackQuery(query.id, {

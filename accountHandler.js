@@ -149,11 +149,11 @@ async function pruneOutdatedContactsAfterProfileUpdate(profile) {
     if (!otherUser) continue;
 
     const approvalState = matchService.getMatchApprovalState(profile, otherUser);
-    const stillMutual =
-      approvalState.sourceToTarget.builds.length > 0 &&
-      approvalState.sourceToTarget.needs.length > 0;
+    const stillMatching =
+      Array.isArray(approvalState.matchedKeywords) &&
+      approvalState.matchedKeywords.length > 0;
 
-    if (stillMutual) continue;
+    if (stillMatching) continue;
 
     const removal = await storage.clearMatchRelationship(chatId, otherChatId);
     if (!removal.removedContacts && !removal.removedRequests) {
