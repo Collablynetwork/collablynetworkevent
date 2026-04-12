@@ -69,6 +69,59 @@ function clearAllChatBridges(chatId) {
   return targets.length;
 }
 
+function clearUserRuntimeState(identifier) {
+  const chatId =
+    identifier && typeof identifier === 'object'
+      ? String(identifier.chatId || '').trim()
+      : String(identifier || '').trim();
+
+  if (!chatId) {
+    return {
+      activeChatBridges: 0,
+      senderBroadcastsCleared: 0,
+      broadcastRecipientsPruned: 0,
+    };
+  }
+
+  const activeChatBridges = clearAllChatBridges(chatId);
+  let senderBroadcastsCleared = 0;
+  let broadcastRecipientsPruned = 0;
+
+  for (const [senderChatId, broadcast] of Array.from(activeBroadcasts.entries())) {
+    if (String(senderChatId) === chatId) {
+      activeBroadcasts.delete(senderChatId);
+      senderBroadcastsCleared += 1;
+      continue;
+    }
+
+    const recipients = Array.isArray(broadcast?.recipients) ? broadcast.recipients : [];
+    const nextRecipients = recipients.filter(
+      (recipient) => String(recipient?.chatId || '') !== chatId
+    );
+    const removedRecipients = recipients.length - nextRecipients.length;
+
+    if (!removedRecipients) continue;
+
+    broadcastRecipientsPruned += removedRecipients;
+
+    if (nextRecipients.length) {
+      activeBroadcasts.set(senderChatId, {
+        ...broadcast,
+        recipients: nextRecipients,
+      });
+    } else {
+      activeBroadcasts.delete(senderChatId);
+      senderBroadcastsCleared += 1;
+    }
+  }
+
+  return {
+    activeChatBridges,
+    senderBroadcastsCleared,
+    broadcastRecipientsPruned,
+  };
+}
+
 function openChatBridge(chatIdA, chatIdB) {
   const a = String(chatIdA);
   const b = String(chatIdB);
@@ -877,6 +930,7 @@ async function openChatFromCallback(query, bot) {
 }
 
 module.exports = {
+  clearUserRuntimeState,
   openChatFromCallback,
   sendDirectMessage,
   handleAudienceCommand,

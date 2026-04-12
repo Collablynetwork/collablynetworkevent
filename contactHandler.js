@@ -466,6 +466,50 @@ async function handleProfileCompleted(bot, targetChatId) {
   await refreshTrackedMessagesForTarget(bot, targetChatId);
 }
 
+function clearUserRuntimeState(identifier) {
+  const chatId =
+    identifier && typeof identifier === 'object'
+      ? String(identifier.chatId || '').trim()
+      : String(identifier || '').trim();
+
+  if (!chatId) {
+    return {
+      trackedContactMessages: 0,
+      reminderTimers: 0,
+    };
+  }
+
+  const messageKeys = new Set([
+    ...Array.from(trackedMessagesByTarget.get(chatId) || []),
+  ]);
+
+  for (const [messageKey, record] of trackedContactMessages.entries()) {
+    const targetChatIds = Array.isArray(record?.targetChatIds) ? record.targetChatIds : [];
+    if (
+      String(record?.viewerChatId || '') === chatId ||
+      String(record?.chatId || '') === chatId ||
+      targetChatIds.some((targetId) => String(targetId) === chatId)
+    ) {
+      messageKeys.add(messageKey);
+    }
+  }
+
+  let trackedMessageCount = 0;
+  for (const messageKey of messageKeys) {
+    if (!trackedContactMessages.has(messageKey)) continue;
+    removeTrackedMessage(messageKey);
+    trackedMessageCount += 1;
+  }
+
+  const hadTimer = reminderReactivationTimers.has(chatId);
+  clearReminderReactivationTimer(chatId);
+
+  return {
+    trackedContactMessages: trackedMessageCount,
+    reminderTimers: hadTimer ? 1 : 0,
+  };
+}
+
 /* ============ /contacts command (first page) ============ */
 async function showContacts(msg, bot) {
   const chatId = String(msg.chat.id);
@@ -630,4 +674,4 @@ async function handleCallback(query, bot) {
   }
 }
 
-module.exports = { showContacts, handleCallback, handleProfileCompleted };
+module.exports = { showContacts, handleCallback, handleProfileCompleted, clearUserRuntimeState };

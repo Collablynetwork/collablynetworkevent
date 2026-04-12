@@ -4,6 +4,9 @@ const { HAS_ADMIN_CONFIG, isAdmin } = require('../config');
 const storage = require('../services/storage');
 const reachability = require('../services/reachability');
 const matchService = require('../services/matchmaking');
+const chatHandler = require('./chatHandler');
+const contactHandler = require('./contactHandler');
+const accountHandler = require('./accountHandler');
 const { PROJECT_CATEGORY_OPTIONS } = require('../utils/projectCategories');
 
 const approvalKeywordSessions = new Map();
@@ -115,6 +118,34 @@ function clearApprovalSession(chatId) {
   approvalKeywordSessions.delete(String(chatId));
 }
 
+function clearUserRuntimeState(identifier) {
+  const chatId =
+    identifier && typeof identifier === 'object'
+      ? String(identifier.chatId || '').trim()
+      : String(identifier || '').trim();
+
+  if (!chatId) {
+    return { approvalKeywordSessions: 0 };
+  }
+
+  return { approvalKeywordSessions: approvalKeywordSessions.delete(chatId) ? 1 : 0 };
+}
+
+function collectNonZeroCounts(parts = []) {
+  const merged = {};
+
+  for (const part of parts) {
+    if (!part || typeof part !== 'object') continue;
+    for (const [key, value] of Object.entries(part)) {
+      const count = Number(value || 0);
+      if (!count) continue;
+      merged[key] = (merged[key] || 0) + count;
+    }
+  }
+
+  return merged;
+}
+
 function buildApprovalKeywordKeyboard(session) {
   const options = Array.isArray(session.options) ? session.options : [];
   const rows = [];
@@ -205,17 +236,47 @@ async function handleRemoveUserCommand(msg, bot, rawArgs) {
   }
 
   const result = await storage.removeKnownUserData(identifier);
-  const totalRemoved = Object.values(result.removedRows || {}).reduce(
+  const runtimeRemoved = collectNonZeroCounts([
+    typeof accountHandler.clearUserRuntimeState === 'function'
+      ? accountHandler.clearUserRuntimeState(result.target)
+      : null,
+    typeof chatHandler.clearUserRuntimeState === 'function'
+      ? chatHandler.clearUserRuntimeState(result.target)
+      : null,
+    typeof contactHandler.clearUserRuntimeState === 'function'
+      ? contactHandler.clearUserRuntimeState(result.target)
+      : null,
+    clearUserRuntimeState(result.target),
+    typeof reachability.clearTelegramUnavailableCache === 'function'
+      ? {
+          telegramReachabilityCache: reachability.clearTelegramUnavailableCache(result.target)
+            .removed
+            ? 1
+            : 0,
+        }
+      : null,
+  ]);
+
+  const storedRemovedCount = Object.values(result.removedRows || {}).reduce(
     (sum, count) => sum + Number(count || 0),
     0
   );
+  const runtimeRemovedCount = Object.values(runtimeRemoved).reduce(
+    (sum, count) => sum + Number(count || 0),
+    0
+  );
+  const totalRemoved = storedRemovedCount + runtimeRemovedCount;
 
   if (!totalRemoved) {
-    await bot.sendMessage(chatId, `⚠️ No stored rows found for "${identifier}".`);
+    await bot.sendMessage(chatId, `⚠️ No stored or pending entries found for "${identifier}".`);
     return;
   }
 
-  const summary = Object.entries(result.removedRows || {})
+  const storedSummary = Object.entries(result.removedRows || {})
+    .filter(([, count]) => Number(count) > 0)
+    .map(([dataset, count]) => `${dataset}: ${count}`)
+    .join('\n');
+  const runtimeSummary = Object.entries(runtimeRemoved)
     .filter(([, count]) => Number(count) > 0)
     .map(([dataset, count]) => `${dataset}: ${count}`)
     .join('\n');
@@ -224,7 +285,8 @@ async function handleRemoveUserCommand(msg, bot, rawArgs) {
     chatId,
     [
       `✅ Removed stored data for ${result.target?.username ? `@${result.target.username}` : result.target?.chatId || identifier}.`,
-      summary,
+      storedSummary ? `Stored cleanup:\n${storedSummary}` : null,
+      runtimeSummary ? `Runtime cleanup:\n${runtimeSummary}` : null,
     ].join('\n')
   );
 }
@@ -740,6 +802,7 @@ async function handleApprovalKeywordCallback(query, bot) {
 }
 
 module.exports = {
+  clearUserRuntimeState,
   handleAddEventCommand,
   handleAddApprovalKeywordCommand,
   handleApprovalKeywordCallback,

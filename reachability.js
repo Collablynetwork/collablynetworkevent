@@ -94,6 +94,19 @@ async function clearTelegramUnavailable(identifier, username = '') {
   return result;
 }
 
+function clearTelegramUnavailableCache(identifier) {
+  const normalized =
+    identifier && typeof identifier === 'object'
+      ? normalizeChatId(identifier.chatId)
+      : normalizeChatId(identifier);
+
+  if (!normalized) {
+    return { removed: false };
+  }
+
+  return { removed: unavailableTelegramUserIds.delete(normalized) };
+}
+
 function isTelegramUnavailable(userId) {
   const normalized = normalizeChatId(userId);
   return normalized ? unavailableTelegramUserIds.has(normalized) : false;
@@ -116,6 +129,7 @@ function isTelegramBlocked(userId) {
 }
 
 module.exports = {
+  clearTelegramUnavailableCache,
   clearTelegramUnavailable,
   getTelegramUnavailableReason,
   hydrateTelegramUnavailableCache,

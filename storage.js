@@ -2212,6 +2212,40 @@ async function removeKnownUserData(identifier) {
     return (chatId && rowChatId === chatId) || (normalizedUsername && rowUsername === normalizedUsername);
   });
 
+  await ensureSheetHeader('massDmHistory', HEADERS.massDmHistory);
+  const massDmHistory = await getMassDmHistory();
+  const remainingMassDmHistory = [];
+  let removedMassDmReferences = 0;
+
+  for (const entry of massDmHistory) {
+    const senderMatches = chatId && String(entry.senderChatId || '') === chatId;
+    if (senderMatches) {
+      removedMassDmReferences += 1;
+      continue;
+    }
+
+    const originalDeliveries = Array.isArray(entry.deliveries) ? entry.deliveries : [];
+    const nextDeliveries = originalDeliveries.filter(
+      (delivery) => !chatId || String(delivery.chatId || '') !== chatId
+    );
+    removedMassDmReferences += originalDeliveries.length - nextDeliveries.length;
+
+    if (nextDeliveries.length) {
+      remainingMassDmHistory.push({
+        ...entry,
+        deliveries: nextDeliveries,
+      });
+    } else if (originalDeliveries.length === 0) {
+      remainingMassDmHistory.push(entry);
+    }
+  }
+
+  removedRows.massDmHistory = removedMassDmReferences;
+  await replaceDatasetRows(
+    'massDmHistory',
+    remainingMassDmHistory.map((entry) => toMassDmHistoryRow(entry))
+  );
+
   await removeByFilter('telegramReachability', (row) => {
     const rowChatId = String(row[0] || '');
     const rowUsername = normalizeUsername(row[1]);

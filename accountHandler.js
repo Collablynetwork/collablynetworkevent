@@ -565,6 +565,22 @@ async function handleChangeStatus(msg, bot) {
   }
 }
 
+function clearUserRuntimeState(identifier) {
+  const chatId =
+    identifier && typeof identifier === "object"
+      ? String(identifier.chatId || "").trim()
+      : String(identifier || "").trim();
+
+  if (!chatId) {
+    return { profileSessions: 0 };
+  }
+
+  const hadSession = Boolean(sessions[chatId]);
+  delete sessions[chatId];
+
+  return { profileSessions: hadSession ? 1 : 0 };
+}
+
 // ─────────────────────────────────────────────────────────────
 // Share Profile
 // ─────────────────────────────────────────────────────────────
@@ -596,6 +612,7 @@ async function shareProfile(msg, bot) {
 // Exports
 // ─────────────────────────────────────────────────────────────
 module.exports = {
+  clearUserRuntimeState,
   handleMessage,
   handleCallbackQuery,
   handleStart,
