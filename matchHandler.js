@@ -75,10 +75,6 @@ function hasBlockingRelationshipStatus(value = '') {
   );
 }
 
-function hasAnyCurrentMatch(approvalState = {}) {
-  return Array.isArray(approvalState.matchedKeywords) && approvalState.matchedKeywords.length > 0;
-}
-
 async function saveContactFlex(fromId, toId, ts) {
   if (typeof storage.saveContact !== "function") return;
   // Try object shape first, then array shape
@@ -476,24 +472,6 @@ async function handleCallback(query, bot) {
       if (!sourceAvailability.ok || !targetAvailability.ok) {
         await bot.answerCallbackQuery(query.id, {
           text: '⚠️ One of these users is blocked, inactive, or unreachable right now.',
-          show_alert: true,
-        });
-        return;
-      }
-
-      const approvalKeywords = await matchService.getAdminApprovalKeywords();
-      const approvalState = matchService.getMatchApprovalState(
-        sourceProfile,
-        targetProfile,
-        approvalKeywords
-      );
-      const stillMatching = hasAnyCurrentMatch(approvalState);
-
-      if (!stillMatching) {
-        await storage.upsertRequestStatus(fromId, toId, 'admin_rejected');
-        await setInlineButtonState(bot, msg, '❌ No Longer Matching');
-        await bot.answerCallbackQuery(query.id, {
-          text: '❌ These profiles no longer match.',
           show_alert: true,
         });
         return;
