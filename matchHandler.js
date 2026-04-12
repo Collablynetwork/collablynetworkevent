@@ -260,61 +260,14 @@ async function onNewRegistration(profile, bot) {
   }
 }
 
-async function showIncomingOnlyLeads(chatId, myProfile, bot) {
-  const pendingRequests = await storage.getPendingRequests(String(chatId));
-  const latestPendingByRequester = new Map();
-
-  for (const request of pendingRequests) {
-    const requesterId = String(request.from || '').trim();
-    if (!requesterId) continue;
-
-    const existing = latestPendingByRequester.get(requesterId);
-    const currentTs = Date.parse(String(request.timestamp || '')) || 0;
-    const existingTs = existing ? Date.parse(String(existing.timestamp || '')) || 0 : -1;
-
-    if (!existing || currentTs >= existingTs) {
-      latestPendingByRequester.set(requesterId, request);
-    }
-  }
-
-  const pendingProfiles = [];
-
-  for (const request of latestPendingByRequester.values()) {
-    const requesterProfile = await storage.getSingleUser(String(request.from));
-    if (!requesterProfile) continue;
-    if (!storage.isActiveUserStatus(requesterProfile.status)) continue;
-    if (await storage.isBlockedUser(requesterProfile.chatId, requesterProfile.username)) continue;
-    if (reachability.isTelegramBlocked(requesterProfile.chatId)) continue;
-
-    const availability = await storage.canAttemptUserContact(requesterProfile);
-    if (!availability.ok) continue;
-
-    pendingProfiles.push(requesterProfile);
-  }
-
-  if (!pendingProfiles.length) {
-    return bot.sendMessage(
-      chatId,
-      escapeMDV2(
-        "📥 No leads yet. Existing matching users will be notified first. You will see leads here after someone sends you a proposal."
-      ),
-      { parse_mode: "MarkdownV2" }
-    );
-  }
-
-  for (const profile of pendingProfiles) {
-    const text = formatProfileCard(profile, myProfile);
-    await bot.sendMessage(chatId, text, {
-      parse_mode: "MarkdownV2",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [[
-          { text: "✅ Accept", callback_data: `accept_${profile.chatId}` },
-          { text: "❌ Decline", callback_data: `decline_${profile.chatId}` },
-        ]],
-      },
-    });
-  }
+async function showIncomingOnlyLeads(chatId, bot) {
+  return bot.sendMessage(
+    chatId,
+    escapeMDV2(
+      "📥 Leads are hidden for newly registered profiles. Existing matching users are notified first. You will get a direct bot message when someone sends you a proposal."
+    ),
+    { parse_mode: "MarkdownV2" }
+  );
 }
 
 // /match — find and display mutual-interest + one-way (supply-only) matches
@@ -356,7 +309,7 @@ async function handleMatchCommand(msg, bot) {
 
     const leadAccess = await storage.getLeadAccess(myProfile);
     if (leadAccess.mode === "incoming_only") {
-      return showIncomingOnlyLeads(chatId, myProfile, bot);
+      return showIncomingOnlyLeads(chatId, bot);
     }
 
     const others = [];
