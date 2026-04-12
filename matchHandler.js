@@ -727,24 +727,8 @@ async function handleCallback(query, bot) {
           actorProfile,
           approvalState
         );
-        await safeSendStatusMessage(
-          bot,
-          otherId,
-          escapeMDV2(
-            "🛡️ Your request was accepted. This match now needs admin approval before profile details can be shared."
-          ),
-          requesterProfile.username
-        );
-        await safeSendStatusMessage(
-          bot,
-          me,
-          escapeMDV2(
-            "🛡️ This match now needs admin approval before profile details can be shared."
-          ),
-          actorProfile.username
-        );
         await bot.answerCallbackQuery(query.id, {
-          text: "🛡️ This match now needs admin approval.",
+          text: "✅ Accepted",
         });
         await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
         return;
