@@ -430,6 +430,10 @@ async function finalizeFlow(chatId, bot) {
 
   if (session.mode === "register") {
     await storage.saveUser(row);
+    await storage.setLeadAccessMode(
+      { chatId: String(data.chatId || chatId), username: data.username || "" },
+      "incoming_only"
+    );
     await contactHandler.handleProfileCompleted(bot, String(data.chatId || chatId));
 
     const approvalKeywords = await matchService.getAdminApprovalKeywords();
