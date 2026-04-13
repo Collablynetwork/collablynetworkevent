@@ -75,6 +75,10 @@ function hasBlockingRelationshipStatus(value = '') {
   );
 }
 
+function hasAnyCurrentMatch(approvalState = {}) {
+  return Array.isArray(approvalState.matchedKeywords) && approvalState.matchedKeywords.length > 0;
+}
+
 async function saveContactFlex(fromId, toId, ts) {
   if (typeof storage.saveContact !== "function") return;
   // Try object shape first, then array shape
@@ -477,6 +481,22 @@ async function handleCallback(query, bot) {
         return;
       }
 
+      const approvalKeywords = await matchService.getAdminApprovalKeywords();
+      const approvalState = matchService.getMatchApprovalState(
+        sourceProfile,
+        targetProfile,
+        approvalKeywords
+      );
+      if (!hasAnyCurrentMatch(approvalState)) {
+        await storage.upsertRequestStatus(fromId, toId, 'admin_rejected');
+        await setInlineButtonState(bot, msg, '❌ No Match');
+        await bot.answerCallbackQuery(query.id, {
+          text: '❌ These profiles no longer match.',
+          show_alert: true,
+        });
+        return;
+      }
+
       const ts = new Date().toISOString();
       await storage.upsertRequestStatus(fromId, toId, 'accepted', ts);
       if (!(await storage.hasContactBetween(fromId, toId))) {
@@ -573,6 +593,21 @@ async function handleCallback(query, bot) {
               targetAvailability.reason === 'unreachable'
                 ? "That user cannot be reached in the bot right now."
                 : "That user is blocked or not active right now.",
+            show_alert: true,
+          });
+          return;
+        }
+
+        const approvalKeywords = await matchService.getAdminApprovalKeywords();
+        const approvalState = matchService.getMatchApprovalState(
+          requester,
+          targetProfile,
+          approvalKeywords
+        );
+        if (!hasAnyCurrentMatch(approvalState)) {
+          await setInlineButtonState(bot, msg, '❌ No Match');
+          await bot.answerCallbackQuery(query.id, {
+            text: "❌ This profile no longer matches.",
             show_alert: true,
           });
           return;
@@ -701,6 +736,15 @@ async function handleCallback(query, bot) {
         actorProfile,
         approvalKeywords
       );
+      if (!hasAnyCurrentMatch(approvalState)) {
+        await storage.upsertRequestStatus(otherId, me, "declined");
+        await bot.answerCallbackQuery(query.id, {
+          text: "❌ This profile no longer matches.",
+          show_alert: true,
+        });
+        await setInlineButtonState(bot, msg, "❌ No Match");
+        return;
+      }
       const latestRelationship = await storage.getLatestRequestBetween(otherId, me);
       const latestRelationshipStatus = normalizeRequestStatus(latestRelationship?.status);
 
