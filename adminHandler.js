@@ -182,7 +182,7 @@ async function startApprovalKeywordPicker(msg, bot, mode) {
   const currentKeywords = await matchService.getAdminApprovalKeywords();
   const options = mode === 'add'
     ? PROJECT_CATEGORY_OPTIONS.slice()
-    : currentKeywords.slice();
+    : currentKeywords.filter((keyword) => !matchService.isDefaultAdminApprovalKeyword(keyword));
 
   if (!options.length) {
     await bot.sendMessage(
@@ -209,8 +209,9 @@ async function startApprovalKeywordPicker(msg, bot, mode) {
         'Then tap Submit Add.',
       ].join('\n')
     : [
-        'Select one or more current approval keywords to remove.',
-        `Current approval keywords: ${currentKeywords.join(', ')}`,
+        'Select one or more additional approval keywords to remove.',
+        `Always-on premium keywords: ${currentKeywords.filter((keyword) => matchService.isDefaultAdminApprovalKeyword(keyword)).join(', ') || 'none'}`,
+        `Additional removable keywords: ${options.join(', ') || 'none'}`,
         'Then tap Submit Remove.',
       ].join('\n');
 
@@ -579,11 +580,27 @@ async function handleApprovalKeywordsCommand(msg, bot) {
 
   const chatId = String(msg.chat.id);
   const keywords = await matchService.getAdminApprovalKeywords();
+  const defaultKeywords = keywords.filter((keyword) =>
+    matchService.isDefaultAdminApprovalKeyword(keyword)
+  );
+  const extraKeywords = keywords.filter((keyword) =>
+    !matchService.isDefaultAdminApprovalKeyword(keyword)
+  );
 
   await bot.sendMessage(
     chatId,
     keywords.length
-      ? ['Admin approval keywords:', ...keywords.map((keyword, index) => `${index + 1}. ${keyword}`)].join('\n')
+      ? [
+          'Admin approval keywords:',
+          '',
+          'Always-on premium keywords:',
+          ...defaultKeywords.map((keyword, index) => `${index + 1}. ${keyword}`),
+          '',
+          'Additional keywords:',
+          ...(extraKeywords.length
+            ? extraKeywords.map((keyword, index) => `${index + 1}. ${keyword}`)
+            : ['none']),
+        ].join('\n')
       : 'No admin approval keywords configured.'
   );
 }
@@ -598,10 +615,18 @@ async function handleAddApprovalKeywordCommand(msg, bot, rawArgs) {
     return;
   }
 
+  const currentKeywords = await matchService.getAdminApprovalKeywords();
+  const normalizedCurrent = new Set(
+    currentKeywords.map((keyword) => String(keyword || '').trim().toLowerCase())
+  );
   const added = [];
   const existing = [];
 
   for (const keyword of keywords) {
+    if (normalizedCurrent.has(String(keyword || '').trim().toLowerCase())) {
+      existing.push(keyword);
+      continue;
+    }
     const result = await storage.addApprovalKeyword(
       keyword,
       msg.from?.username ? `@${msg.from.username}` : String(msg.from?.id || '')
@@ -636,8 +661,13 @@ async function handleRemoveApprovalKeywordCommand(msg, bot, rawArgs) {
 
   const removed = [];
   const missing = [];
+  const locked = [];
 
   for (const keyword of keywords) {
+    if (matchService.isDefaultAdminApprovalKeyword(keyword)) {
+      locked.push(keyword);
+      continue;
+    }
     const result = await storage.removeApprovalKeyword(keyword);
     if (result.removed) removed.push(keyword);
     else missing.push(keyword);
@@ -649,6 +679,7 @@ async function handleRemoveApprovalKeywordCommand(msg, bot, rawArgs) {
     chatId,
     [
       removed.length ? `✅ Removed: ${removed.join(', ')}` : null,
+      locked.length ? `ℹ️ Always-on premium keywords cannot be removed: ${locked.join(', ')}` : null,
       missing.length ? `⚠️ Not found: ${missing.join(', ')}` : null,
     ]
       .filter(Boolean)
@@ -721,8 +752,16 @@ async function handleApprovalKeywordCallback(query, bot) {
     if (mode === 'add') {
       const added = [];
       const existing = [];
+      const currentKeywords = await matchService.getAdminApprovalKeywords();
+      const normalizedCurrent = new Set(
+        currentKeywords.map((keyword) => String(keyword || '').trim().toLowerCase())
+      );
 
       for (const keyword of selectedKeywords) {
+        if (normalizedCurrent.has(String(keyword || '').trim().toLowerCase())) {
+          existing.push(keyword);
+          continue;
+        }
         const result = await storage.addApprovalKeyword(
           keyword,
           query.from?.username ? `@${query.from.username}` : String(query.from?.id || '')
@@ -755,8 +794,13 @@ async function handleApprovalKeywordCallback(query, bot) {
 
     const removed = [];
     const missing = [];
+    const locked = [];
 
     for (const keyword of selectedKeywords) {
+      if (matchService.isDefaultAdminApprovalKeyword(keyword)) {
+        locked.push(keyword);
+        continue;
+      }
       const result = await storage.removeApprovalKeyword(keyword);
       if (result.removed) removed.push(keyword);
       else missing.push(keyword);
@@ -776,6 +820,7 @@ async function handleApprovalKeywordCallback(query, bot) {
       chatId,
       [
         removed.length ? `✅ Removed: ${removed.join(', ')}` : null,
+        locked.length ? `ℹ️ Always-on premium keywords cannot be removed: ${locked.join(', ')}` : null,
         missing.length ? `⚠️ Not found: ${missing.join(', ')}` : null,
       ]
         .filter(Boolean)

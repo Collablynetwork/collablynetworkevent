@@ -3,7 +3,7 @@ const {
   matchedProjectCategories,
   matchedLookingFor,
 } = require("../utils/categoryFilter");
-const DEFAULT_ADMIN_APPROVAL_KEYWORDS = ["CEX"];
+const DEFAULT_ADMIN_APPROVAL_KEYWORDS = ["CEX", "Venture Capital", "Market Maker"];
 
 const ADMIN_TELEGRAM = ["collablynetwork_admin"];
 let adminApprovalKeywordsCache = DEFAULT_ADMIN_APPROVAL_KEYWORDS.slice();
@@ -33,9 +33,10 @@ async function hydrateAdminApprovalKeywords(force = false) {
   }
 
   const rows = await storage.getApprovalKeywords();
-  adminApprovalKeywordsCache = rows
-    .map((row) => String(row.keyword || '').trim())
-    .filter(Boolean);
+  adminApprovalKeywordsCache = uniquePreservingOrder([
+    ...DEFAULT_ADMIN_APPROVAL_KEYWORDS,
+    ...rows.map((row) => String(row.keyword || '').trim()).filter(Boolean),
+  ]);
   adminApprovalKeywordsLoaded = true;
 
   return adminApprovalKeywordsCache.slice();
@@ -56,6 +57,13 @@ function hasAdminApprovalKeyword(values = [], keywords = adminApprovalKeywordsCa
     .filter(Boolean);
 
   return normalizedValues.some((value) => normalizedKeywords.includes(value));
+}
+
+function isDefaultAdminApprovalKeyword(value = '') {
+  const normalized = normalizeKeyword(value);
+  return DEFAULT_ADMIN_APPROVAL_KEYWORDS.some(
+    (keyword) => normalizeKeyword(keyword) === normalized
+  );
 }
 
 function normalizeProfile(profile = {}) {
@@ -112,7 +120,7 @@ function getMatchApprovalState(profileA, profileB, keywords = adminApprovalKeywo
     approvalMatchedKeywords,
     requiresAdminApproval:
       matchedKeywords.length > 0 &&
-      approvalMatchedKeywords.length === matchedKeywords.length,
+      approvalMatchedKeywords.length > 0,
     sourceToTarget: {
       builds: leftBuildsForRight,
       needs: leftNeedsFromRight,
@@ -220,5 +228,6 @@ module.exports = {
   getAdminApprovalKeywords,
   getAdminApprovalKeywordsSync,
   hasAdminApprovalKeyword,
+  isDefaultAdminApprovalKeyword,
   getMatchApprovalState,
 };
