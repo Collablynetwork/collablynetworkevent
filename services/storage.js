@@ -42,6 +42,7 @@ const HEADERS = {
     'deliveryJson',
   ],
   profileUpdateHistory: ['chatId', 'username', 'editedAt'],
+  leadAccess: ['chatId', 'username', 'mode', 'updatedAt'],
   telegramReachability: [
     'chatId',
     'username',
@@ -109,6 +110,15 @@ function normalizeApprovalKeyword(value) {
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase();
+}
+
+function normalizeLeadAccessMode(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+
+  return normalized === 'incoming_only' ? 'incoming_only' : 'open';
 }
 
 function normalizeTelegramReachabilityStatus(value) {
@@ -1332,6 +1342,97 @@ async function recordProfileUpdate(identifier, username = '', editedAt = new Dat
   return parseProfileUpdateHistoryRow(row);
 }
 
+async function getLeadAccess(identifier = '', username = '') {
+  await ensureSheetHeader('leadAccess', HEADERS.leadAccess);
+  const rows = await getRows('leadAccess');
+  const chatId = String(
+    identifier && typeof identifier === 'object' ? identifier.chatId || '' : identifier || ''
+  ).trim();
+  const normalizedUsername = normalizeUsername(
+    identifier && typeof identifier === 'object'
+      ? identifier.username || username || ''
+      : username || ''
+  );
+
+  const match = rows
+    .slice(1)
+    .map((row) => normalizeDataRow(row, HEADERS.leadAccess.length))
+    .find((row) => {
+      const rowChatId = String(row[0] || '').trim();
+      const rowUsername = normalizeUsername(row[1]);
+      return (
+        (chatId && rowChatId === chatId) ||
+        (normalizedUsername && rowUsername === normalizedUsername)
+      );
+    });
+
+  if (!match) {
+    return {
+      chatId,
+      username: normalizedUsername,
+      mode: 'open',
+      updatedAt: '',
+    };
+  }
+
+  return {
+    chatId: String(match[0] || ''),
+    username: String(match[1] || ''),
+    mode: normalizeLeadAccessMode(match[2]),
+    updatedAt: String(match[3] || ''),
+  };
+}
+
+async function setLeadAccessMode(identifier, mode = 'open', username = '') {
+  await ensureSheetHeader('leadAccess', HEADERS.leadAccess);
+  const knownUser =
+    identifier && typeof identifier === 'object'
+      ? identifier
+      : await findKnownUser(identifier);
+
+  const chatId = String(
+    knownUser?.chatId ||
+      (identifier && typeof identifier === 'object' ? identifier.chatId || '' : identifier || '')
+  ).trim();
+  const normalizedUsername = normalizeUsername(
+    knownUser?.username ||
+      (identifier && typeof identifier === 'object' ? identifier.username || username || '' : username || '')
+  );
+
+  if (!chatId && !normalizedUsername) {
+    throw new Error('A chat id or username is required to set lead access mode.');
+  }
+
+  const nextMode = normalizeLeadAccessMode(mode);
+  const updatedAt = new Date().toISOString();
+  const rows = await getRows('leadAccess');
+  const nextRows = rows.slice(1).map((row) => normalizeDataRow(row, HEADERS.leadAccess.length));
+  const index = nextRows.findIndex((row) => {
+    const rowChatId = String(row[0] || '').trim();
+    const rowUsername = normalizeUsername(row[1]);
+    return (
+      (chatId && rowChatId === chatId) ||
+      (normalizedUsername && rowUsername === normalizedUsername)
+    );
+  });
+
+  const nextRow = [chatId, normalizedUsername, nextMode, updatedAt];
+  if (index >= 0) {
+    nextRows[index] = nextRow;
+  } else {
+    nextRows.push(nextRow);
+  }
+
+  await replaceDatasetRows('leadAccess', nextRows);
+
+  return {
+    chatId,
+    username: normalizedUsername,
+    mode: nextMode,
+    updatedAt,
+  };
+}
+
 async function canAttemptUserContact(identifier, username = '') {
   const user =
     identifier && typeof identifier === 'object'
@@ -2212,6 +2313,46 @@ async function removeKnownUserData(identifier) {
     return (chatId && rowChatId === chatId) || (normalizedUsername && rowUsername === normalizedUsername);
   });
 
+  await removeByFilter('leadAccess', (row) => {
+    const rowChatId = String(row[0] || '');
+    const rowUsername = normalizeUsername(row[1]);
+    return (chatId && rowChatId === chatId) || (normalizedUsername && rowUsername === normalizedUsername);
+  });
+
+  await ensureSheetHeader('massDmHistory', HEADERS.massDmHistory);
+  const massDmHistory = await getMassDmHistory();
+  const remainingMassDmHistory = [];
+  let removedMassDmReferences = 0;
+
+  for (const entry of massDmHistory) {
+    const senderMatches = chatId && String(entry.senderChatId || '') === chatId;
+    if (senderMatches) {
+      removedMassDmReferences += 1;
+      continue;
+    }
+
+    const originalDeliveries = Array.isArray(entry.deliveries) ? entry.deliveries : [];
+    const nextDeliveries = originalDeliveries.filter(
+      (delivery) => !chatId || String(delivery.chatId || '') !== chatId
+    );
+    removedMassDmReferences += originalDeliveries.length - nextDeliveries.length;
+
+    if (nextDeliveries.length) {
+      remainingMassDmHistory.push({
+        ...entry,
+        deliveries: nextDeliveries,
+      });
+    } else if (originalDeliveries.length === 0) {
+      remainingMassDmHistory.push(entry);
+    }
+  }
+
+  removedRows.massDmHistory = removedMassDmReferences;
+  await replaceDatasetRows(
+    'massDmHistory',
+    remainingMassDmHistory.map((entry) => toMassDmHistoryRow(entry))
+  );
+
   await removeByFilter('telegramReachability', (row) => {
     const rowChatId = String(row[0] || '');
     const rowUsername = normalizeUsername(row[1]);
@@ -2250,6 +2391,8 @@ module.exports = {
   getProfileUpdateHistory,
   getProfileEditAllowance,
   recordProfileUpdate,
+  getLeadAccess,
+  setLeadAccessMode,
   getSingleUser,
   updateUser,
   isRegistered,

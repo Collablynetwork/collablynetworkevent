@@ -260,6 +260,16 @@ async function onNewRegistration(profile, bot) {
   }
 }
 
+async function showIncomingOnlyLeads(chatId, bot) {
+  return bot.sendMessage(
+    chatId,
+    escapeMDV2(
+      "📥 No leads available right now."
+    ),
+    { parse_mode: "MarkdownV2" }
+  );
+}
+
 // /match — find and display mutual-interest + one-way (supply-only) matches
 async function handleMatchCommand(msg, bot) {
   const chatId = msg.chat.id;
@@ -296,6 +306,11 @@ async function handleMatchCommand(msg, bot) {
     // Ensure arrays
     myProfile.categories  = toArrMaybeCSV(myProfile.categories);
     myProfile.lookingFor  = toArrMaybeCSV(myProfile.lookingFor);
+
+    const leadAccess = await storage.getLeadAccess(myProfile);
+    if (leadAccess.mode === "incoming_only") {
+      return showIncomingOnlyLeads(chatId, bot);
+    }
 
     const others = [];
     for (const user of users) {
@@ -462,26 +477,6 @@ async function handleCallback(query, bot) {
         return;
       }
 
-      const approvalKeywords = await matchService.getAdminApprovalKeywords();
-      const approvalState = matchService.getMatchApprovalState(
-        sourceProfile,
-        targetProfile,
-        approvalKeywords
-      );
-      const stillMutual =
-        approvalState.sourceToTarget.builds.length > 0 &&
-        approvalState.sourceToTarget.needs.length > 0;
-
-      if (!stillMutual) {
-        await storage.upsertRequestStatus(fromId, toId, 'admin_rejected');
-        await setInlineButtonState(bot, msg, '❌ No Longer Matching');
-        await bot.answerCallbackQuery(query.id, {
-          text: '❌ These profiles no longer match.',
-          show_alert: true,
-        });
-        return;
-      }
-
       const ts = new Date().toISOString();
       await storage.upsertRequestStatus(fromId, toId, 'accepted', ts);
       if (!(await storage.hasContactBetween(fromId, toId))) {
@@ -590,7 +585,7 @@ async function handleCallback(query, bot) {
         if (existingStatus === 'accepted') {
           await setInlineButtonState(bot, msg, '✅ Connected');
         } else if (existingStatus === 'admin_pending') {
-          await setInlineButtonState(bot, msg, '🛡️ Under Admin Review');
+          await setInlineButtonState(bot, msg, '✅ Request Sent');
         } else {
           await setInlineButtonState(bot, msg, '✅ Request Sent');
         }
@@ -598,9 +593,7 @@ async function handleCallback(query, bot) {
           text:
             existingStatus === 'accepted'
               ? 'You are already connected with this user.'
-              : existingStatus === 'admin_pending'
-                ? 'This match is already under admin review.'
-                : 'You already sent a request to this user.',
+              : 'You already sent a request to this user.',
           show_alert: true,
         });
         return;
@@ -713,9 +706,9 @@ async function handleCallback(query, bot) {
 
       if (latestRelationshipStatus === 'admin_pending') {
         await bot.answerCallbackQuery(query.id, {
-          text: "🛡️ This match is already under admin review.",
+          text: "✅ Request sent.",
         });
-        await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
+        await setInlineButtonState(bot, msg, "✅ Request Sent");
         return;
       }
 
@@ -728,9 +721,9 @@ async function handleCallback(query, bot) {
           approvalState
         );
         await bot.answerCallbackQuery(query.id, {
-          text: "✅ Accepted",
+          text: "✅ Request sent.",
         });
-        await setInlineButtonState(bot, msg, "🛡️ Under Admin Review");
+        await setInlineButtonState(bot, msg, "✅ Request Sent");
         return;
       }
 

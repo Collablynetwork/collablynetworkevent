@@ -149,11 +149,11 @@ async function pruneOutdatedContactsAfterProfileUpdate(profile) {
     if (!otherUser) continue;
 
     const approvalState = matchService.getMatchApprovalState(profile, otherUser);
-    const stillMutual =
-      approvalState.sourceToTarget.builds.length > 0 &&
-      approvalState.sourceToTarget.needs.length > 0;
+    const stillMatching =
+      Array.isArray(approvalState.matchedKeywords) &&
+      approvalState.matchedKeywords.length > 0;
 
-    if (stillMutual) continue;
+    if (stillMatching) continue;
 
     const removal = await storage.clearMatchRelationship(chatId, otherChatId);
     if (!removal.removedContacts && !removal.removedRequests) {
@@ -172,7 +172,7 @@ async function pruneOutdatedContactsAfterProfileUpdate(profile) {
   };
 }
 
-async function notifyAllMatchedProfiles(bot, profile, matches = []) {
+async function notifyExistingMatchedProfiles(bot, profile, matches = []) {
   const myChatId = Number(profile?.chatId);
   const seen = new Set();
 
@@ -184,7 +184,6 @@ async function notifyAllMatchedProfiles(bot, profile, matches = []) {
     seen.add(matchChatId);
 
     await notifyService.notifyUser(bot, matchChatId, profile);
-    await notifyService.notifyUser(bot, myChatId, match);
   }
 }
 
@@ -431,6 +430,10 @@ async function finalizeFlow(chatId, bot) {
 
   if (session.mode === "register") {
     await storage.saveUser(row);
+    await storage.setLeadAccessMode(
+      { chatId: String(data.chatId || chatId), username: data.username || "" },
+      "incoming_only"
+    );
     await contactHandler.handleProfileCompleted(bot, String(data.chatId || chatId));
 
     const approvalKeywords = await matchService.getAdminApprovalKeywords();
@@ -484,7 +487,7 @@ async function finalizeFlow(chatId, bot) {
 
   if (shouldRefreshMatches) {
     const matches = await matchService.findNotificationMatches(profile);
-    await notifyAllMatchedProfiles(bot, profile, matches);
+    await notifyExistingMatchedProfiles(bot, profile, matches);
   }
 
   delete sessions[chatId];
@@ -565,6 +568,22 @@ async function handleChangeStatus(msg, bot) {
   }
 }
 
+function clearUserRuntimeState(identifier) {
+  const chatId =
+    identifier && typeof identifier === "object"
+      ? String(identifier.chatId || "").trim()
+      : String(identifier || "").trim();
+
+  if (!chatId) {
+    return { profileSessions: 0 };
+  }
+
+  const hadSession = Boolean(sessions[chatId]);
+  delete sessions[chatId];
+
+  return { profileSessions: hadSession ? 1 : 0 };
+}
+
 // ─────────────────────────────────────────────────────────────
 // Share Profile
 // ─────────────────────────────────────────────────────────────
@@ -596,6 +615,7 @@ async function shareProfile(msg, bot) {
 // Exports
 // ─────────────────────────────────────────────────────────────
 module.exports = {
+  clearUserRuntimeState,
   handleMessage,
   handleCallbackQuery,
   handleStart,
