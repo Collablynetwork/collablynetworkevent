@@ -290,7 +290,7 @@ async function startEditProfile(msg, bot) {
     return bot.sendMessage(chatId, buildEditLimitReachedMessage(allowance));
   }
   initFlow(chatId, "edit", me);
-  sessions[chatId].data.username = me.username || "";
+  sessions[chatId].data.username = msg.from.username || "";
   sessions[chatId].originalData = {
     ...me,
     categories: arrFromMaybeSet(me.categories),
@@ -482,8 +482,7 @@ async function finalizeFlow(chatId, bot) {
   }
 
   const shouldRefreshMatches =
-    session.mode === "register" ||
-    shouldRefreshMatchesForProfileUpdate(originalProfile, profile);
+    session.mode === "register" || session.mode === "edit";
 
   if (shouldRefreshMatches) {
     const matches = await matchService.findNotificationMatches(profile);

@@ -78,17 +78,39 @@ function buildMatchSummaryLines(otherUser, viewer) {
   return lines;
 }
 
+function hasMutualCategoryMatch(otherUser, viewer) {
+  const otherProfile = {
+    ...otherUser,
+    categories: normalizeProfileList(otherUser.categories),
+    lookingFor: normalizeProfileList(otherUser.lookingFor),
+  };
+  const viewerProfile = {
+    ...viewer,
+    categories: normalizeProfileList(viewer.categories),
+    lookingFor: normalizeProfileList(viewer.lookingFor),
+  };
+
+  const theyBuild = matchedProjectCategories(otherProfile, viewerProfile) || [];
+  const theyNeed = matchedLookingFor(otherProfile, viewerProfile) || [];
+
+  return theyBuild.length > 0 && theyNeed.length > 0;
+}
+
 function buildSameEventPromptText(event, otherUser, viewer) {
   const xUrl = getLatestTwitterProfileLink(otherUser.xUrl);
   const xLine = xUrl
     ? `<a href="${escapeHtml(xUrl)}">X profile</a>`
     : "N/A";
   const matchLines = buildMatchSummaryLines(otherUser, viewer);
+  const eventTitle = escapeHtml(event.title || "this event");
 
   return [
-    "🎟️ Someone else is also going to this event",
+    "🤝 A relevant event connection was found",
     "",
-    `🎫 Event: <b>${escapeHtml(event.title || "Upcoming event")}</b>`,
+    `You and this potential partner are both attending <b>${eventTitle}</b>.`,
+    "This could be a strong opportunity to connect during the event.",
+    "",
+    `🎫 Event: <b>${eventTitle}</b>`,
     `📅 ${escapeHtml(event.date || "TBA")}   🕒 ${escapeHtml(event.time || "TBA")}`,
     "",
     `🏷️ Project: <b>${escapeHtml(otherUser.projectName || "N/A")}</b>`,
@@ -111,6 +133,7 @@ function buildRevealedProfileText(event, otherUser, viewer) {
   const xLine = xUrl
     ? `<a href="${escapeHtml(xUrl)}">X profile</a>`
     : "N/A";
+  const eventTitle = escapeHtml(event.title || "this event");
   const telegramLine = otherUser.username
     ? `@${escapeHtml(String(otherUser.username).replace(/^@/, ""))}`
     : "Continue in bot";
@@ -118,27 +141,38 @@ function buildRevealedProfileText(event, otherUser, viewer) {
   const lookingFor = normalizeProfileList(otherUser.lookingFor);
   const matchLines = buildMatchSummaryLines(otherUser, viewer);
 
-  return [
-    "🎉 You both are going to the same event",
+  const lines = [
+    "🤝 A potential partner attending the same event was found",
     "",
-    `🎫 Event: <b>${escapeHtml(event.title || "Upcoming event")}</b>`,
+    `You and this potential partner are both attending <b>${eventTitle}</b>.`,
+    "We recommend connecting before or during the event.",
+    "",
+    `🎫 Event: <b>${eventTitle}</b>`,
     `📅 ${escapeHtml(event.date || "TBA")}   🕒 ${escapeHtml(event.time || "TBA")}`,
     "",
     `🏷️ Project: <b>${escapeHtml(otherUser.projectName || "N/A")}</b>`,
     `🔗 X(Twitter): ${xLine}`,
     `👤 Contact Person: ${escapeHtml(otherUser.fullName || "N/A")}`,
     `🧠 Role: ${escapeHtml(otherUser.role || "N/A")}`,
-    `🏗️ Building: ${escapeHtml(categories.join(", ") || "N/A")}`,
-    `🎯 Looking for: ${escapeHtml(lookingFor.join(", ") || "N/A")}`,
     `📞 Telegram: ${telegramLine}`,
+  ];
+
+  if (categories.length) {
+    lines.push(`🏗️ Building: ${escapeHtml(categories.join(", "))}`);
+  }
+
+  if (lookingFor.length) {
+    lines.push(`🎯 Looking for: ${escapeHtml(lookingFor.join(", "))}`);
+  }
+
+  return [
+    ...lines,
     matchLines.length ? "" : null,
     matchLines.length ? "<b>Why this is a fit</b>" : null,
     ...matchLines,
     "",
-    "You can now connect directly or continue chatting inside the bot.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `You can now connect directly and meet at <b>${eventTitle}</b>, or continue chatting inside the bot.`,
+  ].filter(Boolean).join("\n");
 }
 
 async function sendSameEventPrompt(bot, event, viewer, otherUser) {
@@ -192,6 +226,7 @@ async function notifySameEventMatches(bot, event, newAttendee) {
     const otherUser = await storage.getSingleUser(String(otherChatId));
     if (!otherUser) continue;
     if (!storage.isActiveUserStatus(otherUser.status)) continue;
+    if (!hasMutualCategoryMatch(otherUser, newAttendee)) continue;
     if (reachability.isTelegramBlocked(newAttendee.chatId)) continue;
     if (reachability.isTelegramBlocked(otherUser.chatId)) continue;
     if (!(await storage.canAttemptUserContact(newAttendee)).ok) continue;
@@ -207,8 +242,9 @@ async function notifySameEventMatches(bot, event, newAttendee) {
 
     if (!created || !connection) continue;
 
-    await sendSameEventPrompt(bot, event, newAttendee, otherUser);
-    await sendSameEventPrompt(bot, event, otherUser, newAttendee);
+    await ensureMutualEventContact(newAttendee.chatId, otherUser.chatId);
+    await sendMutualEventReveal(bot, event, newAttendee.chatId, otherUser);
+    await sendMutualEventReveal(bot, event, otherUser.chatId, newAttendee);
   }
 }
 
@@ -394,7 +430,7 @@ async function sendEventPage({ bot, chatId, scope = "upcoming", offset = 0 }) {
     controlsKeyboard.push([{ text: "↩️ Back to upcoming", callback_data: "events_scope_upcoming" }]);
   }
 
-  await bot.sendMessage(chatId, "—", {
+  await bot.sendMessage(chatId, "\u200B", {
     reply_markup: { inline_keyboard: controlsKeyboard },
   });
 }
