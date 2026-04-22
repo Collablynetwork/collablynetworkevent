@@ -51,6 +51,38 @@ function normalizeProfileList(values) {
     .filter(Boolean);
 }
 
+function hasCompletedProfile(profile) {
+  if (!profile) return false;
+
+  return (
+    String(profile.fullName || "").trim().length > 0 &&
+    String(profile.projectName || "").trim().length > 0 &&
+    String(profile.role || "").trim().length > 0 &&
+    normalizeProfileList(profile.categories).length > 0 &&
+    normalizeProfileList(profile.lookingFor).length > 0
+  );
+}
+
+async function requireCompletedProfileForEvents(bot, chatId, query = null) {
+  const profile = await storage.getSingleUser(String(chatId));
+  if (hasCompletedProfile(profile)) {
+    return profile;
+  }
+
+  const text = "Please complete your profile first before using Events.";
+
+  if (query?.id) {
+    await bot.answerCallbackQuery(query.id, {
+      text: "Complete your profile first.",
+      show_alert: true,
+    });
+  } else {
+    await bot.sendMessage(chatId, text);
+  }
+
+  return null;
+}
+
 function buildMatchSummaryLines(otherUser, viewer) {
   const otherProfile = {
     ...otherUser,
@@ -105,9 +137,9 @@ function buildSameEventPromptText(event, otherUser, viewer) {
   const eventTitle = escapeHtml(event.title || "this event");
 
   return [
-    "🤝 A relevant event connection was found",
+    "🤝 Your event match is attending too",
     "",
-    `You and this potential partner are both attending <b>${eventTitle}</b>.`,
+    `You and your event match are both attending <b>${eventTitle}</b>.`,
     "This could be a strong opportunity to connect during the event.",
     "",
     `🎫 Event: <b>${eventTitle}</b>`,
@@ -142,9 +174,9 @@ function buildRevealedProfileText(event, otherUser, viewer) {
   const matchLines = buildMatchSummaryLines(otherUser, viewer);
 
   const lines = [
-    "🤝 A potential partner attending the same event was found",
+    "🤝 Your event match is attending too",
     "",
-    `You and this potential partner are both attending <b>${eventTitle}</b>.`,
+    `You and your event match are both attending <b>${eventTitle}</b>.`,
     "We recommend connecting before or during the event.",
     "",
     `🎫 Event: <b>${eventTitle}</b>`,
@@ -442,6 +474,8 @@ async function sendEventPage({ bot, chatId, scope = "upcoming", offset = 0 }) {
  */
 async function handleEventsCommand(msg, bot) {
   const chatId = msg.chat.id;
+  const profile = await requireCompletedProfileForEvents(bot, chatId);
+  if (!profile) return;
   return sendEventPage({ bot, chatId, scope: "upcoming", offset: 0 });
 }
 
@@ -559,6 +593,8 @@ async function handleEventCallback(query, bot) {
 
   // pagination "more"
   if (data.startsWith("events_more_")) {
+    const profile = await requireCompletedProfileForEvents(bot, chatId, query);
+    if (!profile) return;
     const [, , scope, offStr] = data.split("_"); // scope can be "upcoming" | "month" | "year" | "all"
     const offset = Number(offStr) || 0;
     await bot.answerCallbackQuery(query.id);
@@ -567,6 +603,8 @@ async function handleEventCallback(query, bot) {
 
   // scope switching
   if (data === "events_scope_month" || data === "events_scope_year" || data === "events_scope_upcoming") {
+    const profile = await requireCompletedProfileForEvents(bot, chatId, query);
+    if (!profile) return;
     const scope = data.replace("events_scope_", ""); // "month" | "year" | "upcoming"
     await bot.answerCallbackQuery(query.id);
     return sendEventPage({ bot, chatId, scope, offset: 0 });
@@ -574,6 +612,8 @@ async function handleEventCallback(query, bot) {
 
   // 1) Going
   if (data.startsWith("going_")) {
+    const attendee = await requireCompletedProfileForEvents(bot, chatId, query);
+    if (!attendee) return;
     const eventId = data.slice("going_".length);
     try {
       const saveResult = await storage.saveItinerary(eventId, chatId);
@@ -612,15 +652,7 @@ async function handleEventCallback(query, bot) {
       );
 
       if (saveResult.created && ev) {
-        const attendee = await storage.getSingleUser(String(chatId));
-        if (attendee) {
-          await notifySameEventMatches(bot, ev, attendee);
-        } else {
-          await bot.sendMessage(
-            Number(chatId),
-            "Complete your profile to unlock same-event networking inside the bot."
-          );
-        }
+        await notifySameEventMatches(bot, ev, attendee);
       }
     } catch (err) {
       console.error("Error saving itinerary:", err);
