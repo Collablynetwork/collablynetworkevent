@@ -7,8 +7,9 @@ function sendMainMenu(
 ) {
   const isMuted = String(status || "").toLowerCase() === "muted";
   const toggleLabel = isMuted ? "🔔 Unmute Notification" : "🔕 Mute Notification";
+  const safeText = String(messageText || "").trim() ? String(messageText) : "\u200B";
 
-  return bot.sendMessage(chatId, String(messageText || " "), {
+  return bot.sendMessage(chatId, safeText, {
     reply_markup: {
       keyboard: [
         ["📥 Leads", "📞 Contacts"],
