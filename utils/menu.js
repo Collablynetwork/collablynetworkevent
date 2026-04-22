@@ -3,7 +3,7 @@ function sendMainMenu(
   bot,
   chatId,
   status = "active",
-  messageText = "🛡️ Protect Every Connection — 📅 Events & Contacts in One Place:"
+  messageText = ""
 ) {
   const isMuted = String(status || "").toLowerCase() === "muted";
   const toggleLabel = isMuted ? "🔔 Unmute Notification" : "🔕 Mute Notification";
