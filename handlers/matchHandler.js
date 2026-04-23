@@ -103,19 +103,20 @@ function formatProfileCard(profile = {}, counterpartProfile = {}) {
   const projCats = projCatsArr.map(escapeMDV2).join(", ");
   const lookingFor = lookingForArr.map(escapeMDV2).join(", ");
 
-  return (
-    `⭐ *Project:* ${projectName}\n` +
-    `🔹 𝕏:${xUrl}\n` +
-    `🔹 *Contact Person:* ${fullName}\n` +
-    `🔹 *Role:* ${role}\n` +
-    `🔹 *Project Category:* ${projCats || escapeMDV2("N/A")}\n` +
-    `🔹 *Project is looking for:* ${lookingFor || escapeMDV2("N/A")}\n` +
-    `🔹 *Telegram:* ${escapeMDV2("🔒")}\n\n` +
-    `${escapeMDV2("Are you interested in partnering with this project?")}\n` +
-    `${escapeMDV2(
+  return [
+    `⭐ *Project:* ${projectName}`,
+    `🔹 𝕏:${xUrl}`,
+    `🔹 *Contact Person:* ${fullName}`,
+    `🔹 *Role:* ${role}`,
+    projCats ? `🔹 *Project Category:* ${projCats}` : null,
+    lookingFor ? `🔹 *Project is looking for:* ${lookingFor}` : null,
+    `🔹 *Telegram:* ${escapeMDV2("🔒")}`,
+    "",
+    escapeMDV2("Are you interested in partnering with this project?"),
+    escapeMDV2(
       "(Note: Telegram details will be revealed after mutual acceptance.)"
-    )}`
-  );
+    ),
+  ].filter(Boolean).join("\n");
 }
 
 function formatAdminProfileBlock(p = {}, cat, lookingForCat) {
@@ -164,15 +165,15 @@ function formatRevealCard(who = {}, viewer = {}) {
     ? `@${escapeMDV2(String(who.username).replace(/^@/, ""))}`
     : escapeMDV2("N/A");
 
-  return (
-    `⭐ *Project:* ${projectName}\n` +
-    `🔹 𝕏: ${xLink}\n` +
-    `🔹 *Contact Person:* ${fullName}\n` +
-    `🔹 *Role:* ${role}\n` +
-    `🔹 *Project Category:* ${projCats || escapeMDV2("N/A")}\n` +
-    `🔹 *Project is looking for:* ${lookingFor || escapeMDV2("N/A")}\n` +
-    `🔹 *Telegram:* ${tg}`
-  );
+  return [
+    `⭐ *Project:* ${projectName}`,
+    `🔹 𝕏: ${xLink}`,
+    `🔹 *Contact Person:* ${fullName}`,
+    `🔹 *Role:* ${role}`,
+    projCats ? `🔹 *Project Category:* ${projCats}` : null,
+    lookingFor ? `🔹 *Project is looking for:* ${lookingFor}` : null,
+    `🔹 *Telegram:* ${tg}`,
+  ].filter(Boolean).join("\n");
 }
 
 function parseAdminMatchCallback(data = '') {
