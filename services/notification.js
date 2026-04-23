@@ -184,6 +184,10 @@ async function notifyUser(bot, userId, newProfile) {
   const matchedLookingFor = newLookingFor.filter((looking) =>
       userCategories.includes(looking)
   );
+  if (!matchedProjectCategories.length || !matchedLookingFor.length) {
+    return;
+  }
+
   const normalizedXUrl = getLatestTwitterProfileLink(newProfile.xUrl);
   const xLinkLine = normalizedXUrl
     ? `<a href="${escapeHtml(normalizedXUrl)}">X profile</a>`

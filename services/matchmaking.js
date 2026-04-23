@@ -132,6 +132,16 @@ function getMatchApprovalState(profileA, profileB, keywords = adminApprovalKeywo
   };
 }
 
+function isMutualMatch(profileA, profileB) {
+  const approvalState = getMatchApprovalState(profileA, profileB);
+  return (
+    Array.isArray(approvalState.sourceToTarget?.builds) &&
+    approvalState.sourceToTarget.builds.length > 0 &&
+    Array.isArray(approvalState.sourceToTarget?.needs) &&
+    approvalState.sourceToTarget.needs.length > 0
+  );
+}
+
 async function findMatches(newProfile) {
   if (await storage.isBlockedUser(newProfile.chatId, newProfile.username)) {
     return [];
@@ -199,17 +209,11 @@ async function findNotificationMatches(newProfile) {
     const candidateAvailability = await storage.canAttemptUserContact(user);
     if (!candidateAvailability.ok) continue;
 
-    const theirCategories = normalizeList(user.categories);
-    const theirLookingFor = normalizeList(user.lookingFor);
-
-    const theyWantWhatIBuild = theirLookingFor.some((cat) =>
-      myCategories.includes(cat)
-    );
-    const theyProvideWhatIWant = theirCategories.some((cat) =>
-      myLookingFor.includes(cat)
-    );
-
-    if (!theyWantWhatIBuild && !theyProvideWhatIWant) {
+    if (
+      myCategories.length === 0 ||
+      myLookingFor.length === 0 ||
+      !isMutualMatch(newProfile, user)
+    ) {
       continue;
     }
 
@@ -230,4 +234,5 @@ module.exports = {
   hasAdminApprovalKeyword,
   isDefaultAdminApprovalKeyword,
   getMatchApprovalState,
+  isMutualMatch,
 };
