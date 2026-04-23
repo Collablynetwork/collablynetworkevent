@@ -7,7 +7,7 @@ function sendMainMenu(
 ) {
   const isMuted = String(status || "").toLowerCase() === "muted";
   const toggleLabel = isMuted ? "🔔 Unmute Notification" : "🔕 Mute Notification";
-  const safeText = String(messageText || "").trim() ? String(messageText) : "\u200B";
+  const safeText = String(messageText || "").trim() ? String(messageText) : "Select an option:";
 
   return bot.sendMessage(chatId, safeText, {
     reply_markup: {
