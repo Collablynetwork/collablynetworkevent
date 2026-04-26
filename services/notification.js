@@ -45,6 +45,47 @@ function formatAdminProfileSummary(profile = {}, matchLines = []) {
   ].join("\n");
 }
 
+async function notifyAdminsNewProfile(bot, profile) {
+  const adminChatIds = Array.isArray(ADMIN_CHAT_IDS) ? ADMIN_CHAT_IDS : [];
+  const profileChatId = String(profile?.chatId || "").trim();
+
+  if (!profileChatId) {
+    return { notified: false, count: 0 };
+  }
+
+  if (!adminChatIds.length) {
+    console.warn(
+      `⚠️ New profile notification skipped for ${profileChatId}: no ADMIN_CHAT_IDS are configured.`
+    );
+    return { notified: false, count: 0 };
+  }
+
+  const text = [
+    "🆕 New profile submitted",
+    "",
+    formatAdminProfileSummary(profile),
+  ].join("\n");
+
+  let sentCount = 0;
+
+  for (const adminChatId of adminChatIds) {
+    try {
+      await bot.sendMessage(adminChatId, text, {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      });
+      sentCount += 1;
+    } catch (error) {
+      console.warn(
+        `⚠️ Failed to notify admin ${adminChatId} about new profile ${profileChatId}:`,
+        error?.message || error
+      );
+    }
+  }
+
+  return { notified: sentCount > 0, count: sentCount };
+}
+
 async function notifyAdminsForApproval(bot, sourceProfile, targetProfile, approvalState) {
   const fromId = String(sourceProfile.chatId || "").trim();
   const toId = String(targetProfile.chatId || "").trim();
@@ -258,4 +299,4 @@ async function notifyUser(bot, userId, newProfile) {
   }
 }
 
-module.exports = { notifyUser, notifyAdminsForApproval };
+module.exports = { notifyUser, notifyAdminsForApproval, notifyAdminsNewProfile };
