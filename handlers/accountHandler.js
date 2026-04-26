@@ -435,6 +435,7 @@ async function finalizeFlow(chatId, bot) {
       "incoming_only"
     );
     await contactHandler.handleProfileCompleted(bot, String(data.chatId || chatId));
+    await notifyService.notifyAdminsNewProfile(bot, profile);
 
     const approvalKeywords = await matchService.getAdminApprovalKeywords();
     if (matchService.hasAdminApprovalKeyword(looks, approvalKeywords)) {
