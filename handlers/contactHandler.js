@@ -2,7 +2,6 @@
 'use strict';
 
 const storage = require("../services/storage");
-const matchService = require("../services/matchmaking");
 const chatHandler = require("./chatHandler");
 const { getLatestTwitterProfileLink } = require("../utils");
 const {
@@ -49,14 +48,6 @@ function toArrMaybeCSV(v) {
 }
 
 function formatContactCard(u, myProfile) {
-  // Normalize admin-approved list once
-  const ADMIN = (matchService.getAdminApprovalKeywordsSync?.() || [])
-    .map((x) => String(x).toLowerCase().trim());
-
-  const anyApproved = (arr) =>
-    Array.isArray(arr) &&
-    arr.some((c) => ADMIN.includes(String(c).toLowerCase().trim()));
-
   const projectName = escapeMDV2(u?.projectName || "N/A");
   const xLink = u?.xUrl
     ? linkMDV2("Check X Profile", getLatestTwitterProfileLink(u.xUrl))
@@ -74,15 +65,9 @@ function formatContactCard(u, myProfile) {
   const lookingFor =
     lookingForArr.length ? lookingForArr.map(escapeMDV2).join(", ") : escapeMDV2("N/A");
 
-  // Determine if any admin-approved category is present among matched sets
-  const isAdminApprovedMatch = anyApproved(projCatsArr) || anyApproved(lookingForArr);
-
-  // Telegram handle
   const userHandle = u?.username
     ? `@${escapeMDV2(String(u.username).replace(/^@/, ""))}`
     : escapeMDV2("N/A");
-  const adminHandle = escapeMDV2("@collablynetwork_admin");
-  const tgid = isAdminApprovedMatch ? adminHandle : userHandle;
 
   return (
     `⭐ *Project:* ${projectName}\n` +
@@ -91,7 +76,7 @@ function formatContactCard(u, myProfile) {
     `🔹 *Role:* ${role}\n` +
     `🔹 *Project Category:* ${projCats}\n` +
     `🔹 *Project is looking for:* ${lookingFor}\n` +
-    `🔹 *Telegram:* ${tgid}`
+    `🔹 *Telegram:* ${userHandle}`
   );
 }
 
