@@ -95,7 +95,7 @@ function formatProfileCard(profile = {}, counterpartProfile = {}) {
     ? linkMDV2("X link", getLatestTwitterProfileLink(profile.xUrl))
     : escapeMDV2("N/A");
   const fullName = escapeMDV2(profile.fullName || "N/A");
-  const role = escapeMDV2(profile.role || "N/A");
+  const hiddenField = escapeMDV2("🔒 Hidden until approval");
 
   const projCatsArr =
     matchedProjectCategories(profile, counterpartProfile) || [];
@@ -107,14 +107,14 @@ function formatProfileCard(profile = {}, counterpartProfile = {}) {
     `⭐ *Project:* ${projectName}`,
     `🔹 𝕏:${xUrl}`,
     `🔹 *Contact Person:* ${fullName}`,
-    `🔹 *Role:* ${role}`,
+    `🔹 *Role:* ${hiddenField}`,
     projCats ? `🔹 *Project Category:* ${projCats}` : null,
     lookingFor ? `🔹 *Project is looking for:* ${lookingFor}` : null,
-    `🔹 *Telegram:* ${escapeMDV2("🔒")}`,
+    `🔹 *Telegram:* ${hiddenField}`,
     "",
     escapeMDV2("Are you interested in partnering with this project?"),
     escapeMDV2(
-      "(Note: Telegram details will be revealed after mutual acceptance.)"
+      "(Note: Role and Telegram details will be revealed after mutual acceptance and admin approval if required.)"
     ),
   ].filter(Boolean).join("\n");
 }
