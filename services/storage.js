@@ -3,7 +3,6 @@
 
 const sheetStore = require('./sheetStore');
 const { appendUser, getRows, appendRow, updateRow, replaceSheetData } = sheetStore;
-const { isAdmin } = require('../config');
 
 /* ==========================
    Generic header utilities
@@ -111,12 +110,6 @@ function normalizeApprovalKeyword(value) {
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase();
-}
-
-function isAdminContactIdentifier(value) {
-  const identifier = String(value || '').trim();
-  if (!identifier) return false;
-  return isAdmin(identifier, identifier);
 }
 
 function normalizeLeadAccessMode(value) {
@@ -554,11 +547,6 @@ async function saveContact(contact) {
     return;
   }
 
-  if (isAdminContactIdentifier(fromId) || isAdminContactIdentifier(toId)) {
-    console.warn('saveContact: admin relationship ignored → SKIP', { fromId, toId, ts });
-    return;
-  }
-
   await appendRow('contacts', [fromId, toId, ts]);
 }
 
@@ -567,21 +555,9 @@ async function getContacts() {
   const rows = await getRows('contacts');
   const data = rows.slice(1);
 
-  const contacts = data
+  return data
     .map((r) => [String(r[0] || ''), String(r[1] || ''), String(r[2] || '')])
     .filter(([from, to]) => from && to);
-
-  const filteredContacts = contacts.filter(
-    ([from, to]) =>
-      !isAdminContactIdentifier(from) &&
-      !isAdminContactIdentifier(to)
-  );
-
-  if (filteredContacts.length !== contacts.length) {
-    await replaceSheetData('contacts', [HEADERS.contacts, ...filteredContacts]);
-  }
-
-  return filteredContacts;
 }
 
 async function getContactsFor(chatId) {
