@@ -256,15 +256,15 @@ async function notifyUser(bot, userId, newProfile) {
     `🏷️ Project: <b>${escapeHtml(newProfile.projectName || "N/A")}</b>`,
     `🔗 X(Twitter): ${xLinkLine}`,
     `👤 Contact Person: ${escapeHtml(newProfile.fullName || "N/A")}`,
-    `🧠 Role: ${escapeHtml(newProfile.role || "N/A")}`,
+    "🧠 Role: 🔒 Hidden until approval",
     perfectMatchLines.length ? "" : null,
     perfectMatchLines.length ? "<b>Perfect match</b>" : null,
     ...perfectMatchLines,
     "",
-    "📞 Telegram: 🔒",
+    "📞 Telegram: 🔒 Hidden until approval",
     "",
     "Are you interested in partnering with this project?",
-    "Telegram details will be revealed only after mutual acceptance.",
+    "Role and Telegram details will be revealed after mutual acceptance and admin approval if required.",
   ]
     .filter(Boolean)
     .join("\n");
